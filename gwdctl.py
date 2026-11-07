@@ -172,7 +172,7 @@ def set_admin_account():
 
     c.execute("UPDATE x_setting_items SET value = 'Google Drive' WHERE key = 'site_title'")
     c.execute("UPDATE x_setting_items SET value = '' WHERE key IN ('announcement', 'hide_files')")
-    c.execute("UPDATE x_setting_items SET value = 'true' WHERE key = 'ignore_system_files'")
+    c.execute("UPDATE x_setting_items SET value = 'true' WHERE key IN ('ignore_system_files', 'auto_update_index')")
     c.execute("UPDATE x_setting_items SET value = 'false' WHERE key = 'sign_all'")
     conn.commit()
     conn.close()

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
+	"github.com/OpenListTeam/OpenList/v4/internal/driver"
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/fs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
@@ -206,15 +207,6 @@ func Update(ctx context.Context, parent string, objs []model.Obj) {
 	if isIgnorePath(parent) {
 		return
 	}
-	// only update when index have built
-	progress, err := Progress()
-	if err != nil {
-		log.Errorf("update search index error while get progress: %+v", err)
-		return
-	}
-	if !progress.IsDone {
-		return
-	}
 
 	// Use task queue for Meilisearch to avoid race conditions with async indexing
 	if msInstance, ok := instance.(interface {
@@ -277,4 +269,18 @@ func Update(ctx context.Context, parent string, objs []model.Obj) {
 
 func init() {
 	op.RegisterObjsUpdateHook(Update)
+	op.RegisterStorageHook(func(typ string, storage driver.Driver) {
+		if typ == "add" || typ == "update" {
+			go func() {
+				time.Sleep(3 * time.Second)
+				if instance == nil || Running() {
+					return
+				}
+				progress, err := Progress()
+				if err != nil || progress == nil || !progress.IsDone || progress.ObjCount == 0 {
+					_ = BuildIndex(context.Background(), []string{"/"}, nil, setting.GetInt(conf.MaxIndexDepth, 20), true)
+				}
+			}()
+		}
+	})
 }

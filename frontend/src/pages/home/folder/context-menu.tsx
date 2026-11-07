@@ -1,11 +1,11 @@
 import { Menu, Item, Submenu } from "solid-contextmenu"
-import { useCopyLink, useDownload, useLink, useRouter, useT } from "~/hooks"
+import { useCopyLink, useDownload, useRouter, useT } from "~/hooks"
 import "solid-contextmenu/dist/style.css"
-import { HStack, Icon, Text, useColorMode, Image } from "@hope-ui/solid"
+import { HStack, Icon, Text, useColorMode } from "@hope-ui/solid"
 import { operations } from "../toolbar/operations"
 import { createMemo, For, Show } from "solid-js"
-import { bus, convertURL, notify, pathJoin, torrentParse } from "~/utils"
-import { ObjType, UserMethods } from "~/types"
+import { bus, notify } from "~/utils"
+import { UserMethods } from "~/types"
 import {
   getSettingBool,
   haveSelected,
@@ -15,11 +15,8 @@ import {
   selectedObjs,
   userCan,
 } from "~/store"
-import { players } from "../previews/video_box"
 import { getPreviews } from "../previews"
-import { BsPlayCircleFill } from "solid-icons/bs"
 import { isArchive } from "~/store/archive"
-import axios from "axios"
 
 const ItemContent = (props: { name: string }) => {
   const t = useT()
@@ -40,20 +37,17 @@ export const ContextMenu = () => {
   const t = useT()
   const { colorMode } = useColorMode()
   const { copySelectedRawLink, copySelectedPreviewPage } = useCopyLink()
-  const { batchDownloadSelected, sendToAria2, playlistDownloadSelected } =
-    useDownload()
+  const { batchDownloadSelected, playlistDownloadSelected } = useDownload()
   const canPackageDownload = () => {
     return UserMethods.is_admin(me()) || getSettingBool("package_download")
   }
-  const { rawLink } = useLink()
-  const { isShare, pathname, pushHref, to } = useRouter()
+  const { isShare, pushHref, to } = useRouter()
   const openWithPreviews = createMemo(() => {
     const objs = selectedObjs()
     if (objs.length !== 1) return []
     const obj = objs[0]
     if (obj.is_dir) return []
     return getPreviews({ ...obj, provider: objStore.provider })
-    // .filter((p) => p.key !== "download")
   })
   return (
     <Menu
@@ -140,46 +134,6 @@ export const ContextMenu = () => {
         >
           <ItemContent name="download" />
         </Item>
-        <Submenu
-          hidden={({ props }) => {
-            return props.type !== ObjType.VIDEO
-          }}
-          label={
-            <HStack spacing="$2">
-              <Icon
-                as={BsPlayCircleFill}
-                boxSize="$7"
-                p="$0_5"
-                color="$info9"
-              />
-              <Text>{t("home.preview.play_with")}</Text>
-            </HStack>
-          }
-        >
-          <For each={players}>
-            {(player) => (
-              <Item
-                onClick={({ props }) => {
-                  const href = convertURL(player.scheme, {
-                    raw_url: "",
-                    name: props.name,
-                    d_url: rawLink(props, true),
-                  })
-                  window.open(href, "_self")
-                }}
-              >
-                <HStack spacing="$2">
-                  <Image
-                    m="0 auto"
-                    boxSize="$7"
-                    src={`${window.__dynamic_base__}/images/${player.icon}.webp`}
-                  />
-                  <Text>{player.name}</Text>
-                </HStack>
-              </Item>
-            )}
-          </For>
-        </Submenu>
       </Show>
       <Show when={!oneChecked() && haveSelected()}>
         <Submenu label={<ItemContent name="copy_link" />}>
@@ -209,7 +163,6 @@ export const ContextMenu = () => {
               {t("home.toolbar.playlist_download")}
             </Item>
           </Show>
-          <Item onClick={sendToAria2}>{t("home.toolbar.send_aria2")}</Item>
         </Submenu>
       </Show>
     </Menu>

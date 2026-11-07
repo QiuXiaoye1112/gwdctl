@@ -2,7 +2,6 @@ import { SideMenuItemProps } from "./SideMenu"
 import {
   BsFingerprint,
   BsCloudUploadFill,
-  BsSearch,
 } from "solid-icons/bs"
 import { CgShare } from "solid-icons/cg"
 import { OcWorkflow2 } from "solid-icons/oc"
@@ -67,12 +66,6 @@ export const side_menu_items: SideMenuItem[] = [
     to: "/@manage/shares",
     role: UserRole.GENERAL,
     component: lazy(() => import("./shares/Shares")),
-  },
-  {
-    title: "manage.sidemenu.indexes",
-    icon: BsSearch,
-    to: "/@manage/indexes",
-    component: lazy(() => import("./indexes/index_page")),
   },
   {
     title: "manage.sidemenu.home",
