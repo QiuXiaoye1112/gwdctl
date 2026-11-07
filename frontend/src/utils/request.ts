@@ -1,6 +1,10 @@
 import axios from "axios"
 import { api, log } from "."
-import { recordUserActivity, clearSession } from "./session"
+import {
+  recordUserActivity,
+  clearSession,
+  getSessionTimeoutMinutes,
+} from "./session"
 
 const instance = axios.create({
   baseURL: api + "/api",
@@ -74,10 +78,15 @@ instance.interceptors.response.use(
 const getInitialToken = (): string => {
   try {
     localStorage.removeItem("token") // purge persistent token so reopening webpage requires login
-    const lastActive = Number(sessionStorage.getItem("last_activity_time") || 0)
-    if (lastActive && Date.now() - lastActive > 10 * 60 * 1000) {
-      clearSession()
-      return ""
+    const timeoutMinutes = getSessionTimeoutMinutes()
+    if (timeoutMinutes > 0) {
+      const lastActive = Number(
+        sessionStorage.getItem("last_activity_time") || 0,
+      )
+      if (lastActive && Date.now() - lastActive > timeoutMinutes * 60 * 1000) {
+        clearSession()
+        return ""
+      }
     }
     return sessionStorage.getItem("token") || ""
   } catch {

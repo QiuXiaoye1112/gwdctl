@@ -1,8 +1,24 @@
 import { bus, notify } from "~/utils"
-import { setMe, Me } from "~/store"
+import { setMe, Me, getSettingNumber } from "~/store"
 import { uploadFiles } from "~/pages/home/uploads/Upload"
 
-export const IDLE_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
+export const getSessionTimeoutMinutes = (): number => {
+  try {
+    const local = localStorage.getItem("session_timeout_minutes")
+    if (local !== null && local !== "") {
+      const n = Number(local)
+      if (!isNaN(n) && n >= 0) return n
+    }
+  } catch {}
+  const setting = getSettingNumber("session_timeout_minutes", 10)
+  return setting >= 0 ? setting : 10
+}
+
+export const setSessionTimeoutMinutes = (minutes: number) => {
+  try {
+    localStorage.setItem("session_timeout_minutes", String(minutes))
+  } catch {}
+}
 
 export const getToken = (): string => {
   try {
@@ -60,14 +76,20 @@ export const checkSessionTimeout = (onLogout: () => void) => {
     return
   }
 
+  const timeoutMinutes = getSessionTimeoutMinutes()
+  if (timeoutMinutes <= 0) {
+    // 0 means never timeout / disabled
+    return
+  }
+
   const idle = Date.now() - lastActive
-  if (idle >= IDLE_TIMEOUT_MS) {
+  if (idle >= timeoutMinutes * 60 * 1000) {
     onLogout()
     setMe({} as Me)
     notify.warning(
       localStorage.getItem("lang") === "en"
-        ? "Session expired due to 10 minutes of inactivity. Please log in again."
-        : "会话已超时（10分钟无操作），请重新登录。",
+        ? `Session expired due to ${timeoutMinutes} minutes of inactivity. Please log in again.`
+        : `会话已超时（${timeoutMinutes}分钟无操作），请重新登录。`,
     )
     bus.emit("to", `/@login?redirect=${encodeURIComponent(location.pathname)}`)
   }
