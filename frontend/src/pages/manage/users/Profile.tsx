@@ -1,5 +1,6 @@
 import {
   Button,
+  Checkbox,
   FormControl,
   FormHelperText,
   FormLabel,
@@ -40,6 +41,7 @@ const Profile = () => {
   useManageTitle("manage.sidemenu.profile")
   const { to } = useRouter()
   const [username, setUsername] = createSignal(me().username)
+  const [changePassword, setChangePassword] = createSignal(false)
   const [password, setPassword] = createSignal("")
   const [confirmPassword, setConfirmPassword] = createSignal("")
   const currentTimeout = getSessionTimeoutMinutes()
@@ -118,9 +120,19 @@ const Profile = () => {
   ]
 
   const saveMe = async () => {
-    if (password() && password() !== confirmPassword()) {
-      notify.warning(t("users.confirm_password_not_same"))
-      return
+    if (changePassword()) {
+      if (!password()) {
+        notify.warning(
+          localStorage.getItem("lang") === "en"
+            ? "Please enter a new password"
+            : "请输入新密码",
+        )
+        return
+      }
+      if (password() !== confirmPassword()) {
+        notify.warning(t("users.confirm_password_not_same"))
+        return
+      }
     }
 
     const opt = sessionTimeoutOption()
@@ -149,7 +161,7 @@ const Profile = () => {
     }
 
     const usernameChanged = username() !== me().username
-    const passwordChanged = Boolean(password())
+    const passwordChanged = changePassword() && Boolean(password())
 
     if (usernameChanged || passwordChanged) {
       const resp = await save()
@@ -188,36 +200,6 @@ const Profile = () => {
               setUsername(e.currentTarget.value)
             }}
           />
-        </FormControl>
-      </SimpleGrid>
-      <SimpleGrid gap="$2" columns={{ "@initial": 1, "@md": 2 }} w="$full">
-        <FormControl>
-          <FormLabel for="password">{t("users.change_password")}</FormLabel>
-          <Input
-            id="password"
-            type="password"
-            placeholder="********"
-            value={password()}
-            onInput={(e) => {
-              setPassword(e.currentTarget.value)
-            }}
-          />
-          <FormHelperText>{t("users.change_password-tips")}</FormHelperText>
-        </FormControl>
-        <FormControl>
-          <FormLabel for="confirm-password">
-            {t("users.confirm_password")}
-          </FormLabel>
-          <Input
-            id="confirm-password"
-            type="password"
-            placeholder="********"
-            value={confirmPassword()}
-            onInput={(e) => {
-              setConfirmPassword(e.currentTarget.value)
-            }}
-          />
-          <FormHelperText>{t("users.confirm_password-tips")}</FormHelperText>
         </FormControl>
       </SimpleGrid>
       <SimpleGrid gap="$2" columns={{ "@initial": 1, "@md": 2 }} w="$full">
@@ -267,6 +249,50 @@ const Profile = () => {
           </FormControl>
         </Show>
       </SimpleGrid>
+      <Checkbox
+        checked={changePassword()}
+        onChange={() => {
+          setChangePassword(!changePassword())
+          setPassword("")
+          setConfirmPassword("")
+        }}
+      >
+        {localStorage.getItem("lang") === "en" ? "Change Password" : "更改密码"}
+      </Checkbox>
+      <Show when={changePassword()}>
+        <SimpleGrid gap="$2" columns={{ "@initial": 1, "@md": 2 }} w="$full">
+          <FormControl>
+            <FormLabel for="password">{t("users.change_password")}</FormLabel>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="********"
+              value={password()}
+              onInput={(e) => {
+                setPassword(e.currentTarget.value)
+              }}
+            />
+            <FormHelperText>{t("users.change_password-tips")}</FormHelperText>
+          </FormControl>
+          <FormControl>
+            <FormLabel for="confirm-password">
+              {t("users.confirm_password")}
+            </FormLabel>
+            <Input
+              id="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="********"
+              value={confirmPassword()}
+              onInput={(e) => {
+                setConfirmPassword(e.currentTarget.value)
+              }}
+            />
+            <FormHelperText>{t("users.confirm_password-tips")}</FormHelperText>
+          </FormControl>
+        </SimpleGrid>
+      </Show>
       <HStack spacing="$2">
         <Button loading={loading() || savingTimeout()} onClick={saveMe}>
           {t("global.save")}
