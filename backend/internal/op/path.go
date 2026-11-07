@@ -18,7 +18,7 @@ func GetStorageAndActualPath(rawPath string) (storage driver.Driver, actualPath 
 	storage = GetBalancedStorage(rawPath)
 	if storage == nil {
 		if rawPath == "/" {
-			err = errs.NewErr(errs.StorageNotFound, "please add a storage first")
+			err = errs.NewErr(errs.StorageNotFound, "尚未配置 Google Drive 凭据，请在服务器终端运行 gwdctl 进行配置")
 			return
 		}
 		err = errs.NewErr(errs.StorageNotFound, "rawPath: %s", rawPath)
@@ -37,7 +37,7 @@ func GetStorageVirtualMountPath(rawPath string) (string, error) {
 	storages := getStoragesByPath(rawPath)
 	if len(storages) == 0 {
 		if rawPath == "/" {
-			return "", errs.NewErr(errs.StorageNotFound, "please add a storage first")
+			return "", errs.NewErr(errs.StorageNotFound, "尚未配置 Google Drive 凭据，请在服务器终端运行 gwdctl 进行配置")
 		}
 		return "", errs.NewErr(errs.StorageNotFound, "rawPath: %s", rawPath)
 	}

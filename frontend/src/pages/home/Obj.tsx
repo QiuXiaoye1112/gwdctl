@@ -60,22 +60,17 @@ export const Obj = () => {
     }),
   )
 
-  const isStorageError = createMemo(() => {
+  const displayErr = createMemo(() => {
     const err = objStore.err
-    return (
-      err.includes("storage not found") || err.includes("please add a storage")
-    )
+    if (
+      err.includes("storage not found") ||
+      err.includes("please add a storage") ||
+      err.includes("尚未配置")
+    ) {
+      return "尚未配置 Google Drive 凭据，请在服务器终端运行 gwdctl 进行配置"
+    }
+    return err
   })
-
-  const shouldShowStorageButton = createMemo(() => {
-    return isStorageError() && UserMethods.is_admin(me())
-  })
-
-  const storageErrorActions = () => (
-    <Button colorScheme="accent" onClick={() => to("/@manage/storages")}>
-      {t("global.go_to_storages")}
-    </Button>
-  )
   return (
     <VStack
       ref={(el: HTMLDivElement) => setObjBoxRef(el)}
@@ -90,13 +85,7 @@ export const Obj = () => {
       <Suspense fallback={<FullLoading />}>
         <Switch>
           <Match when={objStore.err}>
-            <Error
-              msg={objStore.err}
-              disableColor
-              actions={
-                shouldShowStorageButton() ? storageErrorActions() : undefined
-              }
-            />
+            <Error msg={displayErr()} disableColor />
           </Match>
           <Match
             when={[State.FetchingObj, State.FetchingObjs].includes(
