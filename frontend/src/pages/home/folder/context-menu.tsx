@@ -1,9 +1,9 @@
-import { Menu, Item, Submenu } from "solid-contextmenu"
-import { useDownload, useRouter, useT } from "~/hooks"
+import { Menu, Item } from "solid-contextmenu"
+import { useRouter, useT } from "~/hooks"
 import "solid-contextmenu/dist/style.css"
 import { HStack, Icon, Text, useColorMode } from "@hope-ui/solid"
 import { operations } from "../toolbar/operations"
-import { createMemo, For, Show } from "solid-js"
+import { For, Show } from "solid-js"
 import { bus, notify } from "~/utils"
 import { UserMethods } from "~/types"
 import {
@@ -15,7 +15,6 @@ import {
   selectedObjs,
   userCan,
 } from "~/store"
-import { getPreviews } from "../previews"
 import { isArchive } from "~/store/archive"
 
 const ItemContent = (props: { name: string }) => {
@@ -36,18 +35,10 @@ const ItemContent = (props: { name: string }) => {
 export const ContextMenu = () => {
   const t = useT()
   const { colorMode } = useColorMode()
-  const { downloadSelected } = useDownload()
   const canPackageDownload = () => {
     return UserMethods.is_admin(me()) || getSettingBool("package_download")
   }
-  const { isShare, pushHref, to } = useRouter()
-  const openWithPreviews = createMemo(() => {
-    const objs = selectedObjs()
-    if (objs.length !== 1) return []
-    const obj = objs[0]
-    if (obj.is_dir) return []
-    return getPreviews({ ...obj, provider: objStore.provider })
-  })
+  const { isShare } = useRouter()
   return (
     <Menu
       id={1}
@@ -55,21 +46,6 @@ export const ContextMenu = () => {
       theme={colorMode() !== "dark" ? "light" : "dark"}
       style="z-index: var(--hope-zIndices-popover)"
     >
-      <Show when={openWithPreviews().length > 0}>
-        <Submenu label={<ItemContent name="open_with" />}>
-          <For each={openWithPreviews()}>
-            {(preview) => (
-              <Item
-                onClick={({ props }) => {
-                  to(`${pushHref(props.name)}?preview=${preview.key}`)
-                }}
-              >
-                {preview.name}
-              </Item>
-            )}
-          </For>
-        </Submenu>
-      </Show>
       <For each={["rename", "move", "copy", "delete"] as const}>
         {(name) => (
           <Item

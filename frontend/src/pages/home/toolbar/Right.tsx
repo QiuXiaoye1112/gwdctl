@@ -7,7 +7,6 @@ import { objStore, selectAll, State, toggleCheckbox, userCan, me } from "~/store
 import { bus } from "~/utils"
 import { operations } from "./operations"
 import { AiOutlineCloudUpload, AiOutlineSetting } from "solid-icons/ai"
-import { OcWorkflow2 } from "solid-icons/oc"
 import { RiSystemRefreshLine } from "solid-icons/ri"
 import { usePath, useRouter } from "~/hooks"
 import { Motion } from "solid-motionone"
@@ -148,15 +147,6 @@ export const Right = () => {
               as={TbCheckbox}
               onClick={toggleCheckbox}
             />
-            <Show when={!isShare() && !UserMethods.is_guest(me())}>
-              <RightIcon
-                as={OcWorkflow2}
-                tips="tasks"
-                onClick={() => {
-                  bus.emit("tool", "tasks")
-                }}
-              />
-            </Show>
             <RightIcon
               as={AiOutlineSetting}
               tips="local_settings"
