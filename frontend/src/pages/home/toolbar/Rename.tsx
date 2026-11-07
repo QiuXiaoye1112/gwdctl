@@ -41,13 +41,6 @@ export const Rename = () => {
             >
               {t("home.conflict_policy.overwrite_existing")}
             </Checkbox>
-            <Checkbox
-              checked={followSeed()}
-              disabled={selectedObjs()[0]?.is_dir}
-              onChange={() => setFollowSeed(!followSeed())}
-            >
-              {t("home.toolbar.follow_seed")}
-            </Checkbox>
           </VStack>
         }
         isRenamingFile={!selectedObjs()[0].is_dir}
@@ -60,7 +53,7 @@ export const Rename = () => {
             pathJoin(pathname(), selectedObjs()[0].name),
             name,
             overwrite(),
-            followSeed(),
+            false,
           )
           handleRespWithNotifySuccess(resp, () => {
             refresh()

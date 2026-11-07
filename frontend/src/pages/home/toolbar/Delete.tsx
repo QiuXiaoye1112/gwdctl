@@ -46,14 +46,6 @@ export const Delete = () => {
         <ModalHeader>{t("home.toolbar.delete")}</ModalHeader>
         <ModalBody>
           <p>{t("home.toolbar.delete-tips")}</p>
-          <Checkbox
-            mt="$2"
-            checked={followSeed()}
-            disabled={selectedObjs().some((obj) => obj.is_dir)}
-            onChange={() => setFollowSeed(!followSeed())}
-          >
-            {t("home.toolbar.follow_seed")}
-          </Checkbox>
         </ModalBody>
         <ModalFooter display="flex" gap="$2">
           <Button onClick={onClose} colorScheme="neutral">
@@ -66,7 +58,7 @@ export const Delete = () => {
               const resp = await ok(
                 pathname(),
                 selectedObjs().map((obj) => obj.name),
-                followSeed(),
+                false,
               )
               handleRespWithNotifySuccess(resp, () => {
                 refresh()

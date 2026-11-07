@@ -88,14 +88,6 @@ export const Copy = () => {
           >
             {t("home.conflict_policy.merge")}
           </Checkbox>
-          <Checkbox
-            mr="auto"
-            checked={followSeed()}
-            disabled={selectedObjs().some((obj) => obj.is_dir)}
-            onChange={() => setFollowSeed(!followSeed())}
-          >
-            {t("home.toolbar.follow_seed")}
-          </Checkbox>
         </VStack>
       }
       onSubmit={async (dst) => {
@@ -106,7 +98,7 @@ export const Copy = () => {
           overwrite(),
           skipExisting(),
           merge(),
-          followSeed(),
+          false,
         )
         handleRespWithNotifySuccess(resp, () => {
           refresh()
@@ -170,14 +162,6 @@ export const Move = () => {
           >
             {t("home.conflict_policy.skip_existing")}
           </Checkbox>
-          <Checkbox
-            mr="auto"
-            checked={followSeed()}
-            disabled={selectedObjs().some((obj) => obj.is_dir)}
-            onChange={() => setFollowSeed(!followSeed())}
-          >
-            {t("home.toolbar.follow_seed")}
-          </Checkbox>
         </VStack>
       }
       onSubmit={async (dst) => {
@@ -187,7 +171,7 @@ export const Move = () => {
           selectedObjs().map((obj) => obj.name),
           overwrite(),
           skipExisting(),
-          followSeed(),
+          false,
         )
         handleRespWithNotifySuccess(resp, () => {
           refresh()

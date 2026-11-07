@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/OpenListTeam/OpenList/v4/drivers/base"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
@@ -77,12 +78,21 @@ func (d *GoogleDrive) MakeDir(ctx context.Context, parentDir model.Obj, dirName 
 }
 
 func (d *GoogleDrive) Move(ctx context.Context, srcObj, dstDir model.Obj) error {
-	query := map[string]string{
-		"addParents":    dstDir.GetID(),
-		"removeParents": "root",
+	var file struct {
+		Parents []string `json:"parents"`
 	}
 	url := "https://www.googleapis.com/drive/v3/files/" + srcObj.GetID()
-	_, err := d.request(url, http.MethodPatch, func(req *resty.Request) {
+	_, err := d.request(url, http.MethodGet, func(req *resty.Request) {
+		req.SetQueryParam("fields", "parents")
+	}, &file)
+	if err != nil {
+		return err
+	}
+	query := map[string]string{
+		"addParents":    dstDir.GetID(),
+		"removeParents": strings.Join(file.Parents, ","),
+	}
+	_, err = d.request(url, http.MethodPatch, func(req *resty.Request) {
 		req.SetQueryParams(query)
 	}, nil)
 	return err
@@ -100,7 +110,18 @@ func (d *GoogleDrive) Rename(ctx context.Context, srcObj model.Obj, newName stri
 }
 
 func (d *GoogleDrive) Copy(ctx context.Context, srcObj, dstDir model.Obj) error {
-	return errs.NotSupport
+	if srcObj.IsDir() {
+		return errs.NotSupport
+	}
+	data := base.Json{
+		"name":    srcObj.GetName(),
+		"parents": []string{dstDir.GetID()},
+	}
+	url := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s/copy", srcObj.GetID())
+	_, err := d.request(url, http.MethodPost, func(req *resty.Request) {
+		req.SetBody(data)
+	}, nil)
+	return err
 }
 
 func (d *GoogleDrive) Remove(ctx context.Context, obj model.Obj) error {
