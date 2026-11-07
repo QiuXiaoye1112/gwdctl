@@ -3,8 +3,7 @@ import {
   bus,
   getExpireDate,
   handleResp,
-  makeTemplateData,
-  matchTemplate,
+  shareMessage,
   notify,
   r,
   randomPwd,
@@ -197,20 +196,7 @@ export const Share = () => {
                 onClick={async () => {
                   const resp = await ok()
                   handleResp(resp, (data) => {
-                    const templateData = makeTemplateData(data, {
-                      site_title: getSetting("site_title"),
-                    })
-                    let msg = matchTemplate(
-                      getSetting("share_summary_content"),
-                      templateData,
-                    )
-                    if (!msg || !msg.trim()) {
-                      const origin = window.location.origin
-                      msg = `${origin}/@s/${data.id}`
-                      if (data.pwd) {
-                        msg += ` 提取码: ${data.pwd}`
-                      }
-                    }
+                    const msg = shareMessage(data, getSetting("share_summary_content"), getSetting("site_title"))
                     setLink(msg)
                     copy(msg)
                     notify.success("分享链接已创建并自动复制到剪贴板！")

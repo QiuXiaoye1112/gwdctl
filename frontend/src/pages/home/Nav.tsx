@@ -18,7 +18,7 @@ export const Nav = () => {
       return ["", ...pathname().split("/").filter(Boolean)]
     } else {
       const p = pathname().split("/").filter(Boolean)
-      return [`@s/${p[1] ?? ""}`, ...p.slice(2)]
+      return [`share/${p[1] ?? ""}`, ...p.slice(2)]
     }
   })
   const t = useT()

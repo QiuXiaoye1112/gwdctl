@@ -11,11 +11,13 @@ import { encodePath, joinBase, log, pathDir, pathJoin, trimBase } from "~/utils"
 import { clearHistory } from "~/store"
 
 const useRouter = () => {
+  const publicPath = (path: string) => path.replace(/^\/@s(?=\/|$)/, "/share")
   const navigate = useNavigate()
   const location = useLocation()
   const params = useParams()
   const pathname = createMemo(() => {
-    return trimBase(decodeURIComponent(location.pathname))
+    const path = trimBase(decodeURIComponent(location.pathname))
+    return path.replace(/^\/share(?=\/|$)/, "/@s")
   })
   const isShare = createMemo(() => {
     return pathname().startsWith("/@s")
@@ -26,6 +28,7 @@ const useRouter = () => {
       ignore_root?: boolean,
       options?: Partial<NavigateOptions>,
     ) => {
+      path = publicPath(path)
       if (!ignore_root && path.startsWith("/")) {
         path = joinBase(path)
       }
@@ -34,12 +37,12 @@ const useRouter = () => {
       navigate(path, options)
     },
     replace: (to: string) => {
-      const path = joinBase(encodePath(pathJoin(pathDir(pathname()), to), true))
+      const path = joinBase(encodePath(publicPath(pathJoin(pathDir(pathname()), to)), true))
       clearHistory(decodeURIComponent(path))
       navigate(path)
     },
     pushHref: (to: string): string => {
-      return encodePath(pathJoin(pathname(), to))
+      return encodePath(publicPath(pathJoin(pathname(), to)))
     },
     back: () => {
       navigate(-1)

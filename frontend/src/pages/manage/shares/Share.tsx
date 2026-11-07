@@ -4,8 +4,7 @@ import { Button, HStack, Td, Tr } from "@hope-ui/solid"
 import {
   handleResp,
   handleRespWithNotifySuccess,
-  makeTemplateData,
-  matchTemplate,
+  shareMessage,
   notify,
   r,
 } from "~/utils"
@@ -115,21 +114,7 @@ export function ShareListItem(props: ShareProps) {
           <Button
             colorScheme="primary"
             onClick={() => {
-              const templateData = makeTemplateData(props.share, {
-                site_title: getSetting("site_title"),
-              })
-              let msg = matchTemplate(
-                getSetting("share_summary_content"),
-                templateData,
-              )
-              if (!msg || !msg.trim()) {
-                const origin = window.location.origin
-                msg = `${origin}/@s/${props.share.id}`
-                if (props.share.pwd) {
-                  msg += ` 提取码: ${props.share.pwd}`
-                }
-              }
-              copy(msg)
+              copy(shareMessage(props.share, getSetting("share_summary_content"), getSetting("site_title")))
             }}
           >
             {t("shares.copy_msg")}

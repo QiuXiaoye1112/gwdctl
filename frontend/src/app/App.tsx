@@ -148,7 +148,7 @@ const App: Component = () => {
                   }
                 />
                 <Route
-                  path={["/@s/*", "/%40s/*"]}
+                  path="/share/*"
                   element={
                     <UserOrGuest>
                       <Home />

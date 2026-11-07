@@ -1,7 +1,25 @@
 import { ShareInfo } from "~/types"
 import { base_path } from "."
+import { matchTemplate } from "./str"
 
 const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+export const shareMessage = (share: ShareInfo, template: string, siteTitle: string) => {
+  const baseUrl = `${location.origin}${base_path}`
+  const url = `${baseUrl}/share/${encodeURIComponent(share.id)}`
+  if (template?.trim()) {
+    try {
+      const rendered = matchTemplate(template, makeTemplateData(share, { site_title: siteTitle }))
+        .split(`${baseUrl}/@s/${share.id}`).join(url)
+        .split(`${baseUrl}/share/${share.id}`).join(url)
+        .split(`${baseUrl}/${share.id}`).join(url)
+      if (rendered.includes(url)) return rendered
+    } catch {
+      // Invalid templates fall back to a usable share link.
+    }
+  }
+  return share.pwd ? `${url} 提取码: ${share.pwd}` : url
+}
 
 export const randomPwd = () => {
   const arr: string[] = Array.from(
