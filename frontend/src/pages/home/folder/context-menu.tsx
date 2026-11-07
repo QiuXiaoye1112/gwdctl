@@ -111,10 +111,10 @@ export const ContextMenu = () => {
       >
         <ItemContent name="decompress" />
       </Item>
-      <Show when={oneChecked()}>
+      <Show when={oneChecked() || selectedObjs().some((o) => o.is_dir)}>
         <Item
           onClick={({ props }) => {
-            if (props.is_dir) {
+            if (props.is_dir || selectedObjs().some((o) => o.is_dir)) {
               if (!canPackageDownload()) {
                 notify.warning(t("home.toolbar.package_download_disabled"))
                 return
@@ -125,21 +125,30 @@ export const ContextMenu = () => {
             }
           }}
         >
-          <ItemContent name="download" />
+          <ItemContent
+            name={
+              selectedObjs().some((o) => o.is_dir)
+                ? "package_download"
+                : "download"
+            }
+          />
         </Item>
       </Show>
-      <Show when={!oneChecked() && haveSelected()}>
-        <Item
-          onClick={() => {
-            if (!canPackageDownload()) {
-              notify.warning(t("home.toolbar.package_download_disabled"))
-              return
-            }
-            bus.emit("tool", "package_download")
-          }}
-        >
-          <ItemContent name="package_download" />
+      <Show
+        when={
+          !oneChecked() &&
+          haveSelected() &&
+          !selectedObjs().some((o) => o.is_dir)
+        }
+      >
+        <Item onClick={downloadSelected}>
+          <ItemContent name="direct_download" />
         </Item>
+        <Show when={canPackageDownload()}>
+          <Item onClick={() => bus.emit("tool", "package_download")}>
+            <ItemContent name="package_download" />
+          </Item>
+        </Show>
       </Show>
     </Menu>
   )

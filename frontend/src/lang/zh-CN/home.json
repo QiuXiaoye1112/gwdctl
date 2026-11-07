@@ -143,11 +143,10 @@
       "upload_download_stream": "下载流直接上传"
     },
     "download": "下载",
+    "direct_download": "直接下载",
     "package_download": "打包下载",
     "package_download_disabled": "打包下载已禁用",
-    "pre_package_download-tips": "在浏览器中使用 StreamSaver 替代服务器进行包下载时，需要相应存储服务支持 CORS，不支持的存储将会导致下载失败。",
     "package_download-tips": "正在下载，请稍候不要关闭页面",
-    "playlist_download": "播放列表下载",
     "upload": "上传",
     "local_settings": "本地设置",
     "recursive_move": "聚合移动",

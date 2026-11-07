@@ -144,11 +144,10 @@
       "upload_download_stream": "Download stream direct upload"
     },
     "download": "Download",
+    "direct_download": "Direct Download",
     "package_download": "Package Download",
     "package_download_disabled": "Package download is disabled",
-    "pre_package_download-tips": "Using streamsaver in the browser instead of the server for package download requires the corresponding storage to support cors, and the unsupported storage will fail.",
     "package_download-tips": "Downloading, please wait don't close the page",
-    "playlist_download": "Playlist Download",
     "upload": "Upload",
     "local_settings": "Local Settings",
     "recursive_move": "Recursive Move",
