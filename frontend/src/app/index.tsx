@@ -14,7 +14,7 @@ const Index = () => {
           return <Error msg={`System error: ${err}`} h="100vh" />
         }}
       >
-        <NotificationsProvider placement="top" duration={1800}>
+        <NotificationsProvider placement="bottom" duration={1800}>
           <Suspense fallback={<FullScreenLoading />}>
             <App />
           </Suspense>

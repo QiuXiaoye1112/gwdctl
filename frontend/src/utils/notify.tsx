@@ -21,6 +21,7 @@ const showCompact = (
         rounded="$lg"
         py="$1_5"
         px="$3"
+        mb="56px"
         fontSize="$sm"
         w="auto"
         maxW="85vw"
