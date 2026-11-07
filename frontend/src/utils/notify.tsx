@@ -1,15 +1,37 @@
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
   Box,
   CloseButton,
-  // Alert,
-  // AlertDescription,
-  // AlertIcon,
-  // AlertTitle,
-  // CloseButton,
   notificationService,
 } from "@hope-ui/solid"
 import { JSXElement } from "solid-js"
 import { alphaBgColor, firstUpperCase } from "."
+
+const showCompact = (
+  status: "success" | "danger" | "info" | "warning",
+  message: string,
+) => {
+  notificationService.show({
+    render: (props) => (
+      <Alert
+        status={status}
+        shadow="$md"
+        rounded="$lg"
+        py="$1_5"
+        px="$3"
+        fontSize="$sm"
+        w="auto"
+        maxW="85vw"
+      >
+        <AlertIcon boxSize="$4" mr="$2" />
+        <AlertDescription mr="$1">{firstUpperCase(message)}</AlertDescription>
+        <CloseButton size="sm" onClick={props.close} />
+      </Alert>
+    ),
+  })
+}
 
 const notify = {
   render: (element: JSXElement) => {
@@ -23,7 +45,7 @@ const notify = {
               backgroundColor: alphaBgColor(),
               boxShadow: "$md",
               borderRadius: "$lg",
-              padding: "$3",
+              padding: "$2 $3",
             }}
           >
             <div
@@ -35,11 +57,10 @@ const notify = {
             >
               <div style={{ margin: "auto" }}>{element}</div>
             </div>
-            <div style={{ display: "inline-block", padding: "5px" }}>
+            <div style={{ display: "inline-block", padding: "2px" }}>
               <CloseButton
+                size="sm"
                 style={{ float: "right" }}
-                right="$2"
-                top="$2"
                 onClick={props.close}
               />
             </div>
@@ -49,56 +70,16 @@ const notify = {
     })
   },
   success: (message: string) => {
-    notificationService.show({
-      status: "success",
-      title: firstUpperCase(message),
-      // render: (props) => (
-      //   <Alert status="success" shadow="$md">
-      //     <AlertIcon mr="$2_5" />
-      //     <AlertDescription mr="$2_5">{message}</AlertDescription>
-      //     <CloseButton size="sm" onClick={props.close} />
-      //   </Alert>
-      // ),
-    })
+    showCompact("success", message)
   },
   error: (message: string) => {
-    notificationService.show({
-      status: "danger",
-      title: firstUpperCase(message),
-      // render: (props) => (
-      //   <Alert status="danger" shadow="$md">
-      //     <AlertIcon mr="$2_5" />
-      //     <AlertDescription mr="$2_5">{message}</AlertDescription>
-      //     <CloseButton size="sm" onClick={props.close} />
-      //   </Alert>
-      // ),
-    })
+    showCompact("danger", message)
   },
   info: (message: string) => {
-    notificationService.show({
-      status: "info",
-      title: firstUpperCase(message),
-      // render: (props) => (
-      //   <Alert status="info" shadow="$md">
-      //     <AlertIcon mr="$2_5" />
-      //     <AlertDescription mr="$2_5">{message}</AlertDescription>
-      //     <CloseButton size="sm" onClick={props.close} />
-      //   </Alert>
-      // ),
-    })
+    showCompact("info", message)
   },
   warning: (message: string) => {
-    notificationService.show({
-      status: "warning",
-      title: firstUpperCase(message),
-      // render: (props) => (
-      //   <Alert status="warning" shadow="$md">
-      //     <AlertIcon mr="$2_5" />
-      //     <AlertDescription mr="$2_5">{message}</AlertDescription>
-      //     <CloseButton size="sm" onClick={props.close} />
-      //   </Alert>
-      // ),
-    })
+    showCompact("warning", message)
   },
 }
 
