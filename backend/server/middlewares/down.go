@@ -80,14 +80,7 @@ func parsePath(path string) string {
 }
 
 func needSign(meta *model.Meta, path string) bool {
-	if setting.GetBool(conf.SignAll) {
-		return true
-	}
-	if common.IsStorageSignEnabled(path) {
-		return true
-	}
-	guest, err := op.GetGuest()
-	if err == nil && guest.Disabled {
+	if common.RequiresDownloadSign(path, false) {
 		return true
 	}
 	if meta == nil || meta.Password == "" {

@@ -319,7 +319,7 @@ func FsGet(c *gin.Context, req *FsGetReq, user *model.User) {
 			rawURL = common.GenerateDownProxyURL(storage.GetStorage(), reqPath)
 			if rawURL == "" {
 				query := ""
-				if isEncrypt(meta, reqPath) || setting.GetBool(conf.SignAll) {
+				if common.RequiresDownloadSign(reqPath, isEncrypt(meta, reqPath)) {
 					query = "?sign=" + sign.Sign(reqPath)
 				}
 				rawURL = fmt.Sprintf("%s/p%s%s",

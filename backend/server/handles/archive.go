@@ -12,7 +12,6 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/fs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/internal/op"
-	"github.com/OpenListTeam/OpenList/v4/internal/setting"
 	"github.com/OpenListTeam/OpenList/v4/internal/sign"
 	"github.com/OpenListTeam/OpenList/v4/internal/task"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
@@ -130,7 +129,7 @@ func FsArchiveMeta(c *gin.Context, req *ArchiveMetaReq, user *model.User) {
 		return
 	}
 	s := ""
-	if isEncrypt(meta, reqPath) || setting.GetBool(conf.SignAll) {
+	if common.RequiresDownloadSign(reqPath, isEncrypt(meta, reqPath)) {
 		s = sign.SignArchive(reqPath)
 	}
 	api := "/ae"
