@@ -99,7 +99,7 @@ const Init = () => {
   const [password, setPassword] = createSignal("")
   const [confirmPassword, setConfirmPassword] = createSignal("")
   const [siteTitle, setSiteTitle] = createSignal(
-    getSetting("site_title") || "Google Drive",
+    getSetting("site_title") || "Cloud Drive",
   )
   const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null
   const initialToken = urlParams ? urlParams.get("token") || "" : ""

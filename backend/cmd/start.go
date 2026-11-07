@@ -17,7 +17,7 @@ import (
 // StartCmd represents the start command
 var StartCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Silent start openlist server with `--force-bin-dir`",
+	Short: "Silent start gwd server with `--force-bin-dir`",
 	Run: func(cmd *cobra.Command, args []string) {
 		start()
 	},
@@ -28,7 +28,7 @@ func start() {
 	if pid != -1 {
 		_, err := os.FindProcess(pid)
 		if err == nil {
-			log.Info("openlist already started, pid ", pid)
+			log.Info("gwd already started, pid ", pid)
 			return
 		}
 	}
@@ -62,7 +62,7 @@ func start() {
 	log.Infof("success start pid: %d", cmd.Process.Pid)
 	err = os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0666)
 	if err != nil {
-		log.Warn("failed to record pid, you may not be able to stop the program with `./openlist stop`")
+		log.Warn("failed to record pid, you may not be able to stop the program with `./gwd stop`")
 	}
 }
 

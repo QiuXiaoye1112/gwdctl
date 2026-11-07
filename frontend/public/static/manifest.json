@@ -2,7 +2,7 @@
   "display": "standalone",
   "scope": "/",
   "start_url": "/",
-  "name": "OpenList",
+  "name": "Cloud Drive",
   "icons": [
     {
       "src": "https://res.oplist.org/logo/512x512.png",

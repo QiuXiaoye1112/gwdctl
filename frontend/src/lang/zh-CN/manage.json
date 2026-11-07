@@ -41,7 +41,7 @@
     "plugins": "插件",
     "seed": "种子"
   },
-  "title": "OpenList 管理",
+  "title": "Cloud Drive 管理",
   "media_lib": {
     "base_title": "媒体基础设置",
     "base_desc": "总开关、Emby / OpenSubsonic 端点和应用密钥",
@@ -51,9 +51,9 @@
     "copy": "复制",
     "copied": "已复制",
     "copy_failed": "复制失败",
-    "protocol_auth_tip": "如果 Emby/Subsonic 客户端没有密钥字段，请使用你的 OpenList 用户名，并将应用密钥填入密码字段。对于会自动追加 /rest 的 Subsonic 客户端，请将地址设为 /@rest。",
+    "protocol_auth_tip": "如果 Emby/Subsonic 客户端没有密钥字段，请使用你的 Cloud Drive 用户名，并将应用密钥填入密码字段。对于会自动追加 /rest 的 Subsonic 客户端，请将地址设为 /@rest。",
     "app_keys": "应用密钥",
-    "app_keys_desc": "用于 Subsonic 令牌身份验证、Emby api_key 和 MoviePilot 等无头客户端。如果客户端没有密钥字段，请输入你的 OpenList 用户名，并将密钥填入密码字段",
+    "app_keys_desc": "用于 Subsonic 令牌身份验证、Emby api_key 和 MoviePilot 等无头客户端。如果客户端没有密钥字段，请输入你的 Cloud Drive 用户名，并将密钥填入密码字段",
     "key_note": "标签",
     "key_note_placeholder": "例如 Symfonium",
     "create": "创建",

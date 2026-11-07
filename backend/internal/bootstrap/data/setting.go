@@ -68,8 +68,9 @@ func initSettings() {
 				continue
 			}
 		}
+		oldDefaultTitle := item.Key == conf.SiteTitle && stored != nil && (stored.Value == "Google Drive" || stored.Value == "OpenList")
 		if item.Key != conf.VERSION && stored != nil &&
-			(len(migrationValue) == 0 || stored.Value != migrationValue) {
+			!oldDefaultTitle && (len(migrationValue) == 0 || stored.Value != migrationValue) {
 			item.Value = stored.Value
 		}
 		_, err = op.HandleSettingItemHook(item)
@@ -104,7 +105,7 @@ func InitialSettings() []model.SettingItem {
 		{Key: conf.VERSION, Value: siteVersion, Type: conf.TypeString, Group: model.SITE, Flag: model.READONLY},
 		//{Key: conf.ApiUrl, Value: "", Type: conf.TypeString, Group: model.SITE},
 		//{Key: conf.BasePath, Value: "", Type: conf.TypeString, Group: model.SITE},
-		{Key: conf.SiteTitle, Value: "Google Drive", Type: conf.TypeString, Group: model.SITE},
+		{Key: conf.SiteTitle, Value: "Cloud Drive", Type: conf.TypeString, Group: model.SITE},
 		{Key: conf.Announcement, Value: "", Type: conf.TypeText, Group: model.SITE},
 		{Key: "pagination_type", Value: "all", Type: conf.TypeSelect, Options: "all,pagination,load_more,auto_load_more", Group: model.SITE},
 		{Key: "default_page_size", Value: "30", Type: conf.TypeNumber, Group: model.SITE},

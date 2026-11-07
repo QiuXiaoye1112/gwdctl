@@ -181,7 +181,7 @@ const DELETE_POLICIES = [
 
 // 格式完整显示名称：OSS 显示格式名，CAS 显示完整名称，BT 显示为种子文件。
 const FORMAT_DISPLAY: Record<string, string> = {
-  oss: "OpenList Sharing Seed",
+  oss: "Cloud Drive Sharing Seed",
   cas: "Content Addressable Storage",
   torrent: "BitTorrent",
 }

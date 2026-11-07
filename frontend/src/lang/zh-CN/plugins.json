@@ -6,7 +6,7 @@
   "author": "作者",
   "status_col": "状态",
   "empty_desc": "未提供描述",
-  "subtitle": "管理和配置 ZIP 文件上传和第三方 URL 安装的 OpenList 插件",
+  "subtitle": "管理和配置 ZIP 文件上传和第三方 URL 安装的 Cloud Drive 插件",
   "search_placeholder": "搜索插件名称、ID、描述或权限……",
   "filter_type": "按类型筛选",
   "types": {

@@ -11,11 +11,11 @@ import (
 )
 
 var RootCmd = &cobra.Command{
-	Use:   "openlist",
+	Use:   "gwd",
 	Short: "A file list program that supports multiple storage.",
 	Long: `A file list program that supports multiple storage,
-built with love by OpenListTeam.
-Complete documentation is available at https://doc.oplist.org/`,
+Cloud Drive file management.
+Project information: https://github.com/QiuXiaoye1112/gwdctl`,
 }
 
 func Execute() {

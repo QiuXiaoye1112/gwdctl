@@ -30,8 +30,8 @@ var AdminCmd = &cobra.Command{
 			utils.Log.Infof("get admin user from CLI")
 			fmt.Println("Admin user's username:", admin.Username)
 			fmt.Println("The password can only be output at the first startup, and then stored as a hash value, which cannot be reversed")
-			fmt.Println("You can reset the password with a random string by running [openlist admin random]")
-			fmt.Println("You can also set a new password by running [openlist admin set NEW_PASSWORD]")
+			fmt.Println("You can reset the password with a random string by running [gwd admin random]")
+			fmt.Println("You can also set a new password by running [gwd admin set NEW_PASSWORD]")
 		}
 	},
 }

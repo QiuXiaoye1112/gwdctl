@@ -130,7 +130,7 @@
     "report_real_size-tips": "启用在上传时报告真实文件大小",
     "root_folder_id": "根文件夹 ID",
     "sms_code": "短信验证码",
-    "sms_code-tips": "待 OpenList 提示 139 邮箱验证码已发送后，再填写此项，并重新保存配置。",
+    "sms_code-tips": "待 Cloud Drive 提示 139 邮箱验证码已发送后，再填写此项，并重新保存配置。",
     "type": "类型",
     "types": {
       "family": "家庭云",
@@ -975,7 +975,7 @@
     "custom_host-tips": "自定义OneDrive下载链接主机",
     "disable_disk_usage": "禁用剩余空间显示",
     "enable_direct_upload": "启用前端直传",
-    "enable_direct_upload-tips": "允许不经OpenList直接上传到OneDrive",
+    "enable_direct_upload-tips": "允许不经Cloud Drive直接上传到OneDrive",
     "is_sharepoint": "是否 SharePoint",
     "redirect_uri": "重定向 URI",
     "refresh_token": "刷新令牌",
@@ -993,7 +993,7 @@
   "Onedrive Sharelink": {
     "disable_disk_usage": "禁用剩余空间显示",
     "enable_direct_upload": "启用直接上传",
-    "enable_direct_upload-tips": "允许直接上传到 OneDrive 而不通过 OpenList",
+    "enable_direct_upload-tips": "允许直接上传到 OneDrive 而不通过 Cloud Drive",
     "password": "密码",
     "root_folder_path": "根文件夹路径",
     "url": "链接"
@@ -1007,7 +1007,7 @@
     "disable_disk_usage": "禁用剩余空间显示",
     "email": "邮箱",
     "enable_direct_upload": "启用前端直传",
-    "enable_direct_upload-tips": "允许不经OpenList直接上传到OneDrive",
+    "enable_direct_upload-tips": "允许不经Cloud Drive直接上传到OneDrive",
     "region": "地区",
     "regions": {
       "cn": "世纪互联",
@@ -1767,8 +1767,8 @@
     "Onedrive": "OneDrive",
     "Onedrive Sharelink": "OneDrive 分享链接",
     "OnedriveAPP": "OneDrive APP",
-    "OpenList": "OpenList",
-    "OpenListShare": "OpenList 分享",
+    "OpenList": "Cloud Drive",
+    "OpenListShare": "Cloud Drive 分享",
     "PikPak": "PikPak",
     "PikPakShare": "PikPak 分享",
     "ProtonDrive": "ProtonDrive",

@@ -1,6 +1,6 @@
 {
   "setup_to": "Setup",
-  "title": "Initialize Google Drive",
+  "title": "Initialize Cloud Drive",
   "username-tips": "Admin username",
   "password-tips": "Set admin password",
   "confirm_password-tips": "Confirm password",
@@ -45,7 +45,7 @@
   "finalizing": "Finalizing...",
   "finalizing_tip": "Please keep this page open until initialization completes.",
   "done_title": "Initialization complete",
-  "done_subtitle": "Your Google Drive instance is ready to use.",
+  "done_subtitle": "Your Cloud Drive instance is ready to use.",
   "done_username": "Admin username",
   "done_site_url": "Site address",
   "done_go_login": "Go to login",

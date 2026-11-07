@@ -1,6 +1,6 @@
 {
   "setup_to": "配置",
-  "title": "初始化 Google Drive",
+  "title": "初始化 Cloud Drive",
   "username-tips": "管理员用户名",
   "password-tips": "设置管理员密码",
   "confirm_password-tips": "确认密码",
@@ -44,7 +44,7 @@
   "finalizing": "即将完成……",
   "finalizing_tip": "请保持此页面打开直到初始化完成。",
   "done_title": "初始化完成",
-  "done_subtitle": "您的 Google Drive 已准备就绪。",
+  "done_subtitle": "您的 Cloud Drive 已准备就绪。",
   "done_username": "管理员用户名",
   "done_site_url": "站点地址",
   "done_go_login": "转到登录",

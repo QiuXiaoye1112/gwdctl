@@ -116,7 +116,7 @@
   "media_strm_template": "STRM 内容模板",
   "media_strm_template-tips": "STRM 内容模板。变量：{site_url} 网站 URL，{path} 虚拟文件路径，{sign} 签名，{name} 文件名。",
   "media_subsonic_allow_password_auth": "媒体 Subsonic 允许密码认证",
-  "media_subsonic_allow_password_auth-tips": "允许 Subsonic 客户端使用 OpenList 登录密码（u+p 参数）进行认证。此方式会将主账号密码暴露给第三方客户端，默认关闭，建议使用应用密钥（apiKey 或 t+s）",
+  "media_subsonic_allow_password_auth-tips": "允许 Subsonic 客户端使用 Cloud Drive 登录密码（u+p 参数）进行认证。此方式会将主账号密码暴露给第三方客户端，默认关闭，建议使用应用密钥（apiKey 或 t+s）",
   "media_subsonic_enabled": "启用 OpenSubsonic API",
   "media_subsonic_enabled-tips": "在 /@rest 提供 OpenSubsonic API，供 Symfonium、Feishin、Amperfy 及类似音乐客户端使用。",
   "media_subsonic_proxy_stream": "代理 Subsonic 音频流",
