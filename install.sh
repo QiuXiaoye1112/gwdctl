@@ -68,5 +68,18 @@ for _ in {1..20}; do
   sleep 0.5
 done
 
-ok "安装完成！默认监听端口: 5244"
+if [[ -f "${INSTALL_DIR}/data/config.json" ]]; then
+  sed -i 's/"address": "0.0.0.0"/"address": "127.0.0.1"/' "${INSTALL_DIR}/data/config.json"
+fi
+python3 -c "
+import sqlite3
+conn = sqlite3.connect('${INSTALL_DIR}/data/data.db')
+conn.execute(\"UPDATE x_setting_items SET value = 'Google Drive' WHERE key = 'site_title'\")
+conn.execute(\"UPDATE x_setting_items SET value = '' WHERE key = 'announcement'\")
+conn.commit()
+conn.close()
+" 2>/dev/null || true
+systemctl restart gwd
+
+ok "安装完成！默认监听: 127.0.0.1:5244"
 ok "请运行 gwdctl 打开终端管理菜单。"
