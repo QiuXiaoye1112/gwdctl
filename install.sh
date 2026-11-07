@@ -75,7 +75,9 @@ python3 -c "
 import sqlite3
 conn = sqlite3.connect('${INSTALL_DIR}/data/data.db')
 conn.execute(\"UPDATE x_setting_items SET value = 'Google Drive' WHERE key = 'site_title'\")
-conn.execute(\"UPDATE x_setting_items SET value = '' WHERE key = 'announcement'\")
+conn.execute(\"UPDATE x_setting_items SET value = '' WHERE key IN ('announcement', 'hide_files')\")
+conn.execute(\"UPDATE x_setting_items SET value = 'true' WHERE key = 'ignore_system_files'\")
+conn.execute(\"UPDATE x_setting_items SET value = 'false' WHERE key = 'sign_all'\")
 conn.commit()
 conn.close()
 " 2>/dev/null || true

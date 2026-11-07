@@ -171,7 +171,9 @@ def set_admin_account():
         """, (username, pwd_hash, pwd_ts, salt))
 
     c.execute("UPDATE x_setting_items SET value = 'Google Drive' WHERE key = 'site_title'")
-    c.execute("UPDATE x_setting_items SET value = '' WHERE key = 'announcement'")
+    c.execute("UPDATE x_setting_items SET value = '' WHERE key IN ('announcement', 'hide_files')")
+    c.execute("UPDATE x_setting_items SET value = 'true' WHERE key = 'ignore_system_files'")
+    c.execute("UPDATE x_setting_items SET value = 'false' WHERE key = 'sign_all'")
     conn.commit()
     conn.close()
     print(f"{C_GREEN}✓ 网页管理员账号已更新！用户名: {username}{C_RESET}")
