@@ -145,7 +145,7 @@ def set_admin_account():
     c.execute("SELECT id, username FROM x_users WHERE role = 2 LIMIT 1")
     row = c.fetchone()
 
-    cur_user = row["username"] if (row and row["username"] != "admin") else "Ethan"
+    cur_user = row["username"] if row else "admin"
     username = input(f"请输入网页登录用户名 [直接回车默认 {cur_user}]: ").strip() or cur_user
     password = input("请输入新的网页登录密码 (至少 4 位): ").strip()
 
