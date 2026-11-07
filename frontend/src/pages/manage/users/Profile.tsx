@@ -12,7 +12,7 @@ import {
 } from "@hope-ui/solid"
 import { createSignal, Show } from "solid-js"
 import { useFetch, useManageTitle, useRouter, useT } from "~/hooks"
-import { setMe, me } from "~/store"
+import { setMe, me, setSettings } from "~/store"
 import { PEmptyResp } from "~/types"
 import {
   handleResp,
@@ -108,7 +108,7 @@ const Profile = () => {
       label:
         localStorage.getItem("lang") === "en"
           ? "Never Timeout"
-          : "永不超时（不自动登出）",
+          : "永不超时",
     },
     {
       value: "custom",
@@ -144,14 +144,25 @@ const Profile = () => {
     setSessionTimeoutMinutes(targetMinutes)
 
     setSavingTimeout(true)
+    let settingSuccess = true
     try {
-      await r.post("/setting/save", [
+      const resp = await r.post("/admin/setting/save", [
         {
           key: "session_timeout_minutes",
           value: String(targetMinutes),
+          type: "number",
+          group: 4,
+          flag: 0,
         },
       ])
+      if (resp.code === 200) {
+        setSettings({ session_timeout_minutes: String(targetMinutes) })
+      } else {
+        settingSuccess = false
+        notify.error(resp.message)
+      }
     } catch (e) {
+      settingSuccess = false
       console.error(
         "Failed to persist session_timeout_minutes to backend settings",
         e,
@@ -170,7 +181,7 @@ const Profile = () => {
         notify.success(t("users.update_profile_success"))
         to(`/@login?redirect=${encodeURIComponent(location.pathname)}`)
       })
-    } else {
+    } else if (settingSuccess) {
       notify.success(
         localStorage.getItem("lang") === "en"
           ? "Profile and session settings saved"
@@ -222,8 +233,8 @@ const Profile = () => {
           />
           <FormHelperText>
             {localStorage.getItem("lang") === "en"
-              ? "Automatically log out after this period of inactivity (0 for never timeout)"
-              : "无操作达到此时间后将自动登出以保证安全（设置为 0 表示不自动超时）"}
+              ? "Automatically log out after this period of inactivity"
+              : "无操作达到此时间后将自动登出以保护账号安全"}
           </FormHelperText>
         </FormControl>
         <Show when={sessionTimeoutOption() === "custom"}>
@@ -239,12 +250,14 @@ const Profile = () => {
               min={0}
               value={customTimeout()}
               onInput={(e) => setCustomTimeout(e.currentTarget.value)}
-              placeholder="10"
+              placeholder={
+                localStorage.getItem("lang") === "en" ? "e.g. 15" : "例如 15"
+              }
             />
             <FormHelperText>
               {localStorage.getItem("lang") === "en"
-                ? "Enter timeout in minutes (0 for never timeout)"
-                : "请输入无操作超时分钟数（0 为永不超时）"}
+                ? "Enter timeout duration in minutes"
+                : "请输入超时分钟数"}
             </FormHelperText>
           </FormControl>
         </Show>

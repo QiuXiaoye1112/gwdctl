@@ -1,8 +1,13 @@
 import { bus, notify } from "~/utils"
-import { setMe, Me, getSettingNumber } from "~/store"
+import { setMe, Me, getSetting, setSettings } from "~/store"
 import { uploadFiles } from "~/pages/home/uploads/Upload"
 
 export const getSessionTimeoutMinutes = (): number => {
+  const settingStr = getSetting("session_timeout_minutes")
+  if (settingStr !== "" && settingStr !== undefined && settingStr !== null) {
+    const n = Number(settingStr)
+    if (!isNaN(n) && n >= 0) return n
+  }
   try {
     const local = localStorage.getItem("session_timeout_minutes")
     if (local !== null && local !== "") {
@@ -10,11 +15,11 @@ export const getSessionTimeoutMinutes = (): number => {
       if (!isNaN(n) && n >= 0) return n
     }
   } catch {}
-  const setting = getSettingNumber("session_timeout_minutes", 10)
-  return setting >= 0 ? setting : 10
+  return 10
 }
 
 export const setSessionTimeoutMinutes = (minutes: number) => {
+  setSettings({ session_timeout_minutes: String(minutes) })
   try {
     localStorage.setItem("session_timeout_minutes", String(minutes))
   } catch {}
