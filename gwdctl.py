@@ -392,14 +392,14 @@ def update_db_storage(addition_obj):
     if row:
         c.execute("""
             UPDATE x_storages 
-            SET mount_path = '/', driver = 'GoogleDrive', addition = ?, modified = ?, status = 'work', disabled = 0
+            SET mount_path = '/', driver = 'GoogleDrive', cache_expiration = 0, addition = ?, modified = ?, status = 'work', disabled = 0
             WHERE id = ?
         """, (add_str, now, row["id"]))
     else:
         c.execute("""
             INSERT INTO x_storages 
             (mount_path, "order", driver, cache_expiration, custom_cache_policies, status, addition, remark, modified, disabled, disable_index, enable_sign, seed_policy, order_by, order_direction, extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url, disable_proxy_sign)
-            VALUES ('/', 0, 'GoogleDrive', 30, '', 'work', ?, '', ?, 0, 0, 0, 'inherit', '', '', '', 0, 'native_proxy', 0, '', 0)
+            VALUES ('/', 0, 'GoogleDrive', 0, '', 'work', ?, '', ?, 0, 0, 0, 'inherit', '', '', '', 0, 'native_proxy', 0, '', 0)
         """, (add_str, now))
 
     conn.commit()
