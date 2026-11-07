@@ -32,11 +32,6 @@ export type ArchiveObj = Obj & {
   pass?: string
 }
 
-export type RenameObj = {
-  src_name: string
-  new_name: string
-}
-
 export type ObjTree = Obj & {
   children?: ObjTree[]
 }

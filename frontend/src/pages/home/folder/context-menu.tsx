@@ -1,5 +1,5 @@
 import { Menu, Item, Submenu } from "solid-contextmenu"
-import { useCopyLink, useDownload, useRouter, useT } from "~/hooks"
+import { useDownload, useRouter, useT } from "~/hooks"
 import "solid-contextmenu/dist/style.css"
 import { HStack, Icon, Text, useColorMode } from "@hope-ui/solid"
 import { operations } from "../toolbar/operations"
@@ -36,8 +36,7 @@ const ItemContent = (props: { name: string }) => {
 export const ContextMenu = () => {
   const t = useT()
   const { colorMode } = useColorMode()
-  const { copySelectedRawLink, copySelectedPreviewPage } = useCopyLink()
-  const { batchDownloadSelected, playlistDownloadSelected } = useDownload()
+  const { batchDownloadSelected } = useDownload()
   const canPackageDownload = () => {
     return UserMethods.is_admin(me()) || getSettingBool("package_download")
   }
@@ -74,7 +73,12 @@ export const ContextMenu = () => {
       <For each={["rename", "move", "copy", "delete"] as const}>
         {(name) => (
           <Item
-            hidden={!userCan(name) || !objStore.write || isShare()}
+            hidden={
+              !userCan(name) ||
+              !objStore.write ||
+              isShare() ||
+              (name === "rename" && !oneChecked())
+            }
             onClick={() => {
               bus.emit("tool", name)
             }}
@@ -111,17 +115,6 @@ export const ContextMenu = () => {
         <Item
           onClick={({ props }) => {
             if (props.is_dir) {
-              copySelectedPreviewPage()
-            } else {
-              copySelectedRawLink(true)
-            }
-          }}
-        >
-          <ItemContent name="copy_link" />
-        </Item>
-        <Item
-          onClick={({ props }) => {
-            if (props.is_dir) {
               if (!canPackageDownload()) {
                 notify.warning(t("home.toolbar.package_download_disabled"))
                 return
@@ -136,21 +129,12 @@ export const ContextMenu = () => {
         </Item>
       </Show>
       <Show when={!oneChecked() && haveSelected()}>
-        <Submenu label={<ItemContent name="copy_link" />}>
-          <Item onClick={copySelectedPreviewPage}>
-            {t("home.toolbar.preview_page")}
-          </Item>
-          <Item onClick={() => copySelectedRawLink()}>
-            {t("home.toolbar.down_link")}
-          </Item>
-          <Item onClick={() => copySelectedRawLink(true)}>
-            {t("home.toolbar.encode_down_link")}
-          </Item>
-        </Submenu>
         <Submenu label={<ItemContent name="download" />}>
-          <Item onClick={batchDownloadSelected}>
-            {t("home.toolbar.batch_download")}
-          </Item>
+          <Show when={selectedObjs().some((o) => !o.is_dir)}>
+            <Item onClick={batchDownloadSelected}>
+              {t("home.toolbar.batch_download")}
+            </Item>
+          </Show>
           <Show
             when={
               UserMethods.is_admin(me()) || getSettingBool("package_download")
@@ -158,9 +142,6 @@ export const ContextMenu = () => {
           >
             <Item onClick={() => bus.emit("tool", "package_download")}>
               {t("home.toolbar.package_download")}
-            </Item>
-            <Item onClick={playlistDownloadSelected}>
-              {t("home.toolbar.playlist_download")}
             </Item>
           </Show>
         </Submenu>

@@ -10,21 +10,19 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/fs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/internal/op"
-	"github.com/OpenListTeam/OpenList/v4/internal/sign"
 	"github.com/OpenListTeam/OpenList/v4/internal/task"
 	"github.com/OpenListTeam/OpenList/v4/pkg/generic"
-	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 	"github.com/OpenListTeam/OpenList/v4/server/common"
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 )
 
-type MkdirOrLinkReq struct {
+type MkdirReq struct {
 	Path string `json:"path" form:"path"`
 }
 
 func FsMkdir(c *gin.Context) {
-	var req MkdirOrLinkReq
+	var req MkdirReq
 	if err := c.ShouldBind(&req); err != nil {
 		common.ErrorResp(c, err, 400)
 		return
@@ -603,38 +601,4 @@ func FsRemoveEmptyDirectory(c *gin.Context) {
 	}
 
 	common.SuccessResp(c)
-}
-
-// Link return real link, just for proxy program, it may contain cookie, so just allowed for admin
-func Link(c *gin.Context) {
-	var req MkdirOrLinkReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
-		return
-	}
-	//user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	//rawPath := stdpath.Join(user.BasePath, req.Path)
-	// why need not join base_path? because it's always the full path
-	rawPath := req.Path
-	storage, err := fs.GetStorage(rawPath, &fs.GetStoragesArgs{})
-	if err != nil {
-		common.ErrorResp(c, err, 500)
-		return
-	}
-	if storage.Config().NoLinkURL {
-		common.SuccessResp(c, model.Link{
-			URL: fmt.Sprintf("%s/p%s?d&sign=%s",
-				common.GetApiUrl(c),
-				utils.EncodePath(rawPath, true),
-				sign.Sign(rawPath)),
-		})
-		return
-	}
-	link, _, err := fs.Link(c.Request.Context(), rawPath, model.LinkArgs{IP: c.ClientIP(), Header: c.Request.Header, Redirect: true})
-	if err != nil {
-		common.ErrorResp(c, err, 500)
-		return
-	}
-	defer link.Close()
-	common.SuccessResp(c, link)
 }

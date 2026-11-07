@@ -120,20 +120,6 @@ export const Right = () => {
             </Show>
             <Show
               when={
-                isFolder() && !isShare() && userCan("rename") && objStore.write
-              }
-            >
-              <RightIcon
-                as={operations.batch_rename.icon}
-                tips="batch_rename"
-                onClick={() => {
-                  selectAll(true)
-                  bus.emit("tool", "batchRename")
-                }}
-              />
-            </Show>
-            <Show
-              when={
                 isFolder() &&
                 !isShare() &&
                 (userCan("write_content") || objStore.write_content_bypass) &&

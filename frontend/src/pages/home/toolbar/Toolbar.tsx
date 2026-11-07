@@ -8,7 +8,6 @@ import { NewFile } from "./NewFile"
 import { Mkdir } from "./Mkdir"
 import { RecursiveMove } from "./RecursiveMove"
 import { RemoveEmptyDirectory } from "./RemoveEmptyDirectory"
-import { BatchRename } from "./BatchRename"
 import { PackageDownloadModal } from "./Download"
 import { lazy } from "solid-js"
 import { ModalWrapper } from "./ModalWrapper"
@@ -33,7 +32,6 @@ export const Modal = () => {
       <Share />
       <RecursiveMove />
       <RemoveEmptyDirectory />
-      <BatchRename />
       <PackageDownloadModal />
       <ModalWrapper name="upload" title="home.toolbar.upload">
         <Upload />

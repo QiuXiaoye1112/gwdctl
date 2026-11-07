@@ -76,6 +76,7 @@ const PackageDownload = (props: { onClose: () => void }) => {
   }
   const [fetchings, setFetchings] = createSignal<string[]>([])
   const run = async () => {
+    totalSize = 0
     let saveName = pathBase(pathname())
     if (selectedObjs.length === 1) {
       saveName = selectedObjs[0].name

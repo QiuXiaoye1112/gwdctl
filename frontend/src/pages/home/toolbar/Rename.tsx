@@ -16,7 +16,6 @@ export const Rename = () => {
   const handler = (name: string) => {
     if (name === "rename") {
       if (!oneChecked()) {
-        bus.emit("tool", "batchRename")
         return
       }
       onOpen()

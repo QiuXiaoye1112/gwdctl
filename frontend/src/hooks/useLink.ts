@@ -98,7 +98,7 @@ export const useLink = () => {
 }
 
 export const useSelectedLink = () => {
-  const { previewPage, rawLink: rawUrl } = useLink()
+  const { rawLink: rawUrl } = useLink()
   const rawLinks = (encodeAll?: boolean) => {
     return selectedObjs()
       .filter((obj) => !obj.is_dir)
@@ -106,28 +106,13 @@ export const useSelectedLink = () => {
   }
   return {
     rawLinks: rawLinks,
-    previewPagesText: () => {
-      return selectedObjs()
-        .map((obj) => previewPage(obj, true))
-        .join("\n")
-    },
-    rawLinksText: (encodeAll?: boolean) => {
-      return rawLinks(encodeAll).join("\n")
-    },
   }
 }
 
 export const useCopyLink = () => {
   const { copy } = useUtil()
-  const { previewPagesText, rawLinksText } = useSelectedLink()
   const { currentObjLink } = useLink()
   return {
-    copySelectedPreviewPage: () => {
-      copy(previewPagesText())
-    },
-    copySelectedRawLink: (encodeAll?: boolean) => {
-      copy(rawLinksText(encodeAll))
-    },
     copyCurrentRawLink: (encodeAll?: boolean) => {
       copy(currentObjLink(encodeAll))
     },

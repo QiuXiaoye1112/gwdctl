@@ -140,8 +140,6 @@ func _fs(g *gin.RouterGroup) {
 	g.Any("/dirs", handles.FsDirs)
 	g.POST("/mkdir", handles.FsMkdir)
 	g.POST("/rename", handles.FsRename)
-	g.POST("/batch_rename", handles.FsBatchRename)
-	g.POST("/regex_rename", handles.FsRegexRename)
 	g.POST("/move", handles.FsMove)
 	g.POST("/recursive_move", handles.FsRecursiveMove)
 	g.POST("/copy", handles.FsCopy)
@@ -157,7 +155,6 @@ func _fs(g *gin.RouterGroup) {
 	multipart.POST("/complete", handles.MultipartComplete)
 	multipart.GET("/status", handles.MultipartStatus)
 	multipart.POST("/abort", handles.MultipartAbort)
-	g.POST("/link", middlewares.AuthAdmin, handles.Link)
 	g.POST("/archive/decompress", handles.FsArchiveDecompress)
 	g.POST("/get_direct_upload_info", handles.FsGetDirectUploadInfo)
 }

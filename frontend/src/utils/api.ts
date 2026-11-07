@@ -6,7 +6,6 @@ import {
   Obj,
   PResp,
   FsSearchResp,
-  RenameObj,
   ArchiveMeta,
   PPageResp,
   TorrentInfo,
@@ -81,13 +80,6 @@ export const fsRename = (
   follow_seed = false,
 ): PEmptyResp => {
   return r.post("/fs/rename", { path, name, overwrite, follow_seed })
-}
-
-export const fsBatchRename = (
-  src_dir: string,
-  rename_objects: RenameObj[],
-): PEmptyResp => {
-  return r.post("/fs/batch_rename", { src_dir, rename_objects })
 }
 
 export const fsMove = (
