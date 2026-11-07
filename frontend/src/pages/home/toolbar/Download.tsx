@@ -1,69 +1,29 @@
 import {
-  Menu,
-  MenuTrigger,
-  MenuContent,
-  MenuItem,
   Modal,
   ModalContent,
   ModalHeader,
   ModalOverlay,
   createDisclosure,
 } from "@hope-ui/solid"
-import { createMemo, lazy, onCleanup, Show, Suspense } from "solid-js"
+import { lazy, onCleanup, Show, Suspense } from "solid-js"
 import { FullLoading } from "~/components"
-import { useT, useDownload } from "~/hooks"
-import { getSettingBool, me, selectedObjs } from "~/store"
-import { UserMethods } from "~/types"
+import { useDownload, useT } from "~/hooks"
+import { getSettingBool, oneChecked, selectedObjs } from "~/store"
 import { bus } from "~/utils"
 import { CenterIcon } from "./Icon"
 
 export const Download = () => {
-  const t = useT()
-  const colorScheme = "neutral"
-  const { batchDownloadSelected } = useDownload()
+  const { downloadSelected } = useDownload()
 
-  const objs = () => selectedObjs()
-  const hasFile = createMemo(() => objs().some((obj) => !obj.is_dir))
-  const canPackage = createMemo(
-    () => UserMethods.is_admin(me()) || getSettingBool("package_download"),
-  )
-  const canPackageOption = createMemo(
-    () => canPackage() && (objs().length > 1 || objs().some((o) => o.is_dir)),
-  )
-
-  const showMenu = createMemo(() => hasFile() && canPackageOption())
-
-  const handleDirectDownload = () => {
-    if (hasFile()) {
-      batchDownloadSelected()
-    } else if (canPackageOption()) {
+  const handleDownload = () => {
+    if (oneChecked() && !selectedObjs()[0].is_dir) {
+      downloadSelected()
+    } else {
       bus.emit("tool", "package_download")
     }
   }
 
-  return (
-    <Show
-      when={showMenu()}
-      fallback={<CenterIcon name="download" onClick={handleDirectDownload} />}
-    >
-      <Menu placement="top" offset={10}>
-        <MenuTrigger as={CenterIcon} name="download" />
-        <MenuContent>
-          <MenuItem colorScheme={colorScheme} onSelect={batchDownloadSelected}>
-            {t("home.toolbar.batch_download")}
-          </MenuItem>
-          <MenuItem
-            colorScheme={colorScheme}
-            onSelect={() => {
-              bus.emit("tool", "package_download")
-            }}
-          >
-            {t("home.toolbar.package_download")}
-          </MenuItem>
-        </MenuContent>
-      </Menu>
-    </Show>
-  )
+  return <CenterIcon name="download" onClick={handleDownload} />
 }
 
 const PackageDownload = lazy(() => import("./PackageDownload"))

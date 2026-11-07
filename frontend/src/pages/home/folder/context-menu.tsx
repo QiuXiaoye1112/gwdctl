@@ -36,7 +36,7 @@ const ItemContent = (props: { name: string }) => {
 export const ContextMenu = () => {
   const t = useT()
   const { colorMode } = useColorMode()
-  const { batchDownloadSelected } = useDownload()
+  const { downloadSelected } = useDownload()
   const canPackageDownload = () => {
     return UserMethods.is_admin(me()) || getSettingBool("package_download")
   }
@@ -121,7 +121,7 @@ export const ContextMenu = () => {
               }
               bus.emit("tool", "package_download")
             } else {
-              batchDownloadSelected()
+              downloadSelected()
             }
           }}
         >
@@ -129,22 +129,17 @@ export const ContextMenu = () => {
         </Item>
       </Show>
       <Show when={!oneChecked() && haveSelected()}>
-        <Submenu label={<ItemContent name="download" />}>
-          <Show when={selectedObjs().some((o) => !o.is_dir)}>
-            <Item onClick={batchDownloadSelected}>
-              {t("home.toolbar.batch_download")}
-            </Item>
-          </Show>
-          <Show
-            when={
-              UserMethods.is_admin(me()) || getSettingBool("package_download")
+        <Item
+          onClick={() => {
+            if (!canPackageDownload()) {
+              notify.warning(t("home.toolbar.package_download_disabled"))
+              return
             }
-          >
-            <Item onClick={() => bus.emit("tool", "package_download")}>
-              {t("home.toolbar.package_download")}
-            </Item>
-          </Show>
-        </Submenu>
+            bus.emit("tool", "package_download")
+          }}
+        >
+          <ItemContent name="package_download" />
+        </Item>
       </Show>
     </Menu>
   )

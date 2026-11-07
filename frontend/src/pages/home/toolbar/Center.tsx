@@ -69,8 +69,10 @@ export const Center = () => {
   // 6. 分享 (share): 任何选中的文件/文件夹均可生成分享
   const canShare = createMemo(() => !isShare() && userCan("share"))
 
-  // 7. 下载 (download): 选中有文件，或者所选全为文件夹但支持打包下载时显示
-  const canDownload = createMemo(() => hasFile() || canPackageDownload())
+  // 7. 下载 (download): 单选文件可直接下载，多选或文件夹需支持打包下载
+  const canDownload = createMemo(
+    () => (oneChecked() && hasFile()) || canPackageDownload(),
+  )
 
   return (
     <Presence exitBeforeEnter>

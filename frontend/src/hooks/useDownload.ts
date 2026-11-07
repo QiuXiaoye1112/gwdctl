@@ -3,11 +3,11 @@ import { useSelectedLink } from "~/hooks"
 export const useDownload = () => {
   const { rawLinks } = useSelectedLink()
   return {
-    batchDownloadSelected: () => {
+    downloadSelected: () => {
       const urls = rawLinks(true)
-      urls.forEach((url) => {
-        window.open(url, "_blank")
-      })
+      if (urls.length > 0) {
+        window.open(urls[0], "_blank")
+      }
     },
   }
 }

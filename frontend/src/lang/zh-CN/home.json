@@ -143,7 +143,6 @@
       "upload_download_stream": "下载流直接上传"
     },
     "download": "下载",
-    "batch_download": "批量下载",
     "package_download": "打包下载",
     "package_download_disabled": "打包下载已禁用",
     "pre_package_download-tips": "在浏览器中使用 StreamSaver 替代服务器进行包下载时，需要相应存储服务支持 CORS，不支持的存储将会导致下载失败。",
