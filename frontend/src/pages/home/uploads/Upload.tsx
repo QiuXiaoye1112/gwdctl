@@ -34,6 +34,21 @@ export const [uploadFiles, setUploadFiles] = createStore<{
   uploads: [],
 })
 
+const abortControllers = new Map<string, AbortController>()
+
+export const cancelUpload = (path: string) => {
+  const controller = abortControllers.get(path)
+  if (controller) {
+    controller.abort()
+    abortControllers.delete(path)
+  }
+  setUploadFiles("uploads", (uploads) => uploads.filter((u) => u.path !== path))
+  bus.emit("tool", "tasks_refresh")
+  notify.info(
+    localStorage.getItem("lang") === "en" ? "Upload canceled" : "已取消上传",
+  )
+}
+
 const UploadFile = (props: UploadFileProps & { onRetry?: () => void }) => {
   const t = useT()
   return (
@@ -71,6 +86,19 @@ const UploadFile = (props: UploadFileProps & { onRetry?: () => void }) => {
               onClick={() => props.onRetry?.()}
             >
               {t("home.upload.retry")}
+            </Button>
+          </Show>
+          <Show
+            when={["uploading", "backending", "pending"].includes(props.status)}
+          >
+            <Button
+              compact
+              size="xs"
+              colorScheme="danger"
+              variant="subtle"
+              onClick={() => cancelUpload(props.path)}
+            >
+              {localStorage.getItem("lang") === "en" ? "Cancel" : "取消"}
             </Button>
           </Show>
           <Text color="$neutral11">{getFileSize(props.size)}</Text>
@@ -122,6 +150,8 @@ const Upload = () => {
     const path = file.webkitRelativePath ? file.webkitRelativePath : file.name
     setUpload(path, "status", "uploading")
     const uploadPath = pathJoin(baseDir, path)
+    const controller = new AbortController()
+    abortControllers.set(path, controller)
     try {
       const err = await uploader
         .upload(
@@ -133,8 +163,13 @@ const Upload = () => {
           asTask,
           overwrite,
           false,
+          undefined,
+          controller.signal,
         )
         .catch((err) => err)
+      if (controller.signal.aborted) {
+        return
+      }
       if (!err) {
         setUpload(path, "status", "success")
         setUpload(path, "progress", 100)
@@ -145,10 +180,15 @@ const Upload = () => {
         notify.error(`${path}: ${err.message}`)
       }
     } catch (e: any) {
+      if (controller.signal.aborted) {
+        return
+      }
       console.error(e)
       setUpload(path, "status", "error")
       setUpload(path, "msg", e.message)
       notify.error(`${path}: ${e.message}`)
+    } finally {
+      abortControllers.delete(path)
     }
   }
 

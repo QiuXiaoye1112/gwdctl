@@ -13,6 +13,7 @@ import {
   lazy,
   Match,
   onCleanup,
+  onMount,
   Show,
   Suspense,
   Switch,
@@ -26,9 +27,11 @@ import { InitStatus, Resp } from "~/types"
 import {
   base_path,
   bus,
+  changeToken,
   handleRespWithoutAuthAndNotify,
   initPluginEngine,
   r,
+  setupSessionSecurity,
 } from "~/utils"
 import { applyCustomize } from "~/utils/customize"
 import { MustUser, UserOrGuest } from "./MustUser"
@@ -54,6 +57,11 @@ const App: Component = () => {
   bus.on("to", onTo)
   onCleanup(() => {
     bus.off("to", onTo)
+  })
+
+  onMount(() => {
+    const cleanup = setupSessionSecurity(() => changeToken(""))
+    onCleanup(cleanup)
   })
 
   createEffect(() => {

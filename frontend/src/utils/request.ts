@@ -1,5 +1,6 @@
 import axios from "axios"
 import { api, log } from "."
+import { recordUserActivity, clearSession } from "./session"
 
 const instance = axios.create({
   baseURL: api + "/api",
@@ -13,7 +14,8 @@ const instance = axios.create({
 
 instance.interceptors.request.use(
   (config) => {
-    // do something before request is sent
+    // Record user activity on API requests
+    recordUserActivity()
     return config
   },
   (error) => {
@@ -69,12 +71,34 @@ instance.interceptors.response.use(
   },
 )
 
-instance.defaults.headers.common["Authorization"] =
-  localStorage.getItem("token") || ""
+const getInitialToken = (): string => {
+  try {
+    localStorage.removeItem("token") // purge persistent token so reopening webpage requires login
+    const lastActive = Number(sessionStorage.getItem("last_activity_time") || 0)
+    if (lastActive && Date.now() - lastActive > 10 * 60 * 1000) {
+      clearSession()
+      return ""
+    }
+    return sessionStorage.getItem("token") || ""
+  } catch {
+    return ""
+  }
+}
+
+instance.defaults.headers.common["Authorization"] = getInitialToken()
 
 export const changeToken = (token?: string) => {
-  instance.defaults.headers.common["Authorization"] = token ?? ""
-  localStorage.setItem("token", token ?? "")
+  const t = token ?? ""
+  instance.defaults.headers.common["Authorization"] = t
+  try {
+    localStorage.removeItem("token") // ensure never persisted in localStorage
+    if (t) {
+      sessionStorage.setItem("token", t)
+      recordUserActivity()
+    } else {
+      clearSession()
+    }
+  } catch {}
 }
 
 export { instance as r }

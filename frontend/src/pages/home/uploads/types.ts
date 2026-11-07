@@ -47,4 +47,5 @@ export type Upload = (
   overwrite: boolean,
   rapid: boolean,
   seedOptions?: UploadSeedOptions,
+  signal?: AbortSignal,
 ) => Promise<Error | undefined>

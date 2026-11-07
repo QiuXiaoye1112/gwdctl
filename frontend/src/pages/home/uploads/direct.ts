@@ -27,7 +27,9 @@ export const HttpDirectUpload: Upload = async (
   overwrite: boolean,
   _rapid: boolean,
   seedOptions,
+  signal,
 ) => {
+  if (signal?.aborted) return
   const path = pathDir(uploadPath)
 
   // Get direct upload info from backend
@@ -45,8 +47,10 @@ export const HttpDirectUpload: Upload = async (
       headers: {
         Overwrite: overwrite,
       },
+      signal,
     },
   )
+  if (signal?.aborted) return
 
   const uploadInfo = resp.data
 
@@ -70,6 +74,7 @@ export const HttpDirectUpload: Upload = async (
       method,
       uploadInfo.headers,
       setUpload,
+      signal,
     )
   } else {
     // Single upload for drivers that don't support chunking
@@ -79,6 +84,7 @@ export const HttpDirectUpload: Upload = async (
       method,
       uploadInfo.headers,
       setUpload,
+      signal,
     )
   }
 }
@@ -89,21 +95,31 @@ async function uploadSingle(
   method: string,
   headers?: Record<string, string>,
   setUpload?: SetUpload,
+  signal?: AbortSignal,
 ): Promise<undefined> {
+  if (signal?.aborted) return
   const xhr = new XMLHttpRequest()
   const calcSpeed = createSpeedCalculator()
 
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      xhr.abort()
+      resolve(undefined)
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable && setUpload) {
-        const progress = (e.loaded / e.total) * 100
+        const progress = Math.min(99, (e.loaded / e.total) * 100)
         setUpload("progress", progress)
         calcSpeed(e.loaded, setUpload)
       }
     })
 
     xhr.addEventListener("load", () => {
+      signal?.removeEventListener("abort", onAbort)
       if (xhr.status >= 200 && xhr.status < 300) {
+        setUpload?.("progress", 100)
         resolve(undefined)
       } else {
         reject(new Error(`Upload failed with status ${xhr.status}`))
@@ -111,7 +127,13 @@ async function uploadSingle(
     })
 
     xhr.addEventListener("error", () => {
+      signal?.removeEventListener("abort", onAbort)
       reject(new Error("Upload failed"))
+    })
+
+    xhr.addEventListener("abort", () => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve(undefined)
     })
 
     xhr.open(method, uploadURL)
@@ -134,12 +156,14 @@ async function uploadChunked(
   method: string,
   headers?: Record<string, string>,
   setUpload?: SetUpload,
+  signal?: AbortSignal,
 ): Promise<undefined> {
   const totalChunks = Math.ceil(file.size / chunkSize)
   const calcSpeed = createSpeedCalculator()
   let uploadedBytes = 0
 
   for (let i = 0; i < totalChunks; i++) {
+    if (signal?.aborted) return
     const start = i * chunkSize
     const end = Math.min(start + chunkSize, file.size)
     const chunk = file.slice(start, end)
@@ -147,16 +171,23 @@ async function uploadChunked(
     const xhr = new XMLHttpRequest()
 
     await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        xhr.abort()
+        resolve()
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
+
       xhr.upload.addEventListener("progress", (e) => {
         if (e.lengthComputable && setUpload) {
           const totalLoaded = uploadedBytes + e.loaded
-          const progress = (totalLoaded / file.size) * 100
+          const progress = Math.min(99, (totalLoaded / file.size) * 100)
           setUpload("progress", progress)
           calcSpeed(totalLoaded, setUpload)
         }
       })
 
       xhr.addEventListener("load", () => {
+        signal?.removeEventListener("abort", onAbort)
         if (xhr.status >= 200 && xhr.status < 300) {
           uploadedBytes += chunk.size
           resolve()
@@ -168,7 +199,13 @@ async function uploadChunked(
       })
 
       xhr.addEventListener("error", () => {
+        signal?.removeEventListener("abort", onAbort)
         reject(new Error(`Upload chunk ${i + 1} failed`))
+      })
+
+      xhr.addEventListener("abort", () => {
+        signal?.removeEventListener("abort", onAbort)
+        resolve()
       })
 
       xhr.open(method, uploadURL)
@@ -190,5 +227,6 @@ async function uploadChunked(
     })
   }
 
+  setUpload?.("progress", 100)
   return undefined
 }

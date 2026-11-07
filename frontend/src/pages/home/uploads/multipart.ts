@@ -73,7 +73,9 @@ export const MultipartUpload: Upload = async (
   overwrite = false,
   rapid = false,
   seedOptions,
+  signal,
 ): Promise<Error | undefined> => {
+  if (signal?.aborted) return
   // a single-chunk multipart upload costs 3 requests where Stream costs 1,
   // and small files pass CDN body limits anyway — silently fall back
   const fallbackThreshold =
@@ -87,6 +89,7 @@ export const MultipartUpload: Upload = async (
       overwrite,
       rapid,
       seedOptions,
+      signal,
     )
   }
 
@@ -107,6 +110,7 @@ export const MultipartUpload: Upload = async (
     const { md5, sha1, sha256 } = await calculateHash(file, (p) => {
       setUpload("progress", p | 0)
     })
+    if (signal?.aborted) return
     initHeaders["X-File-Md5"] = md5
     initHeaders["X-File-Sha1"] = sha1
     initHeaders["X-File-Sha256"] = sha256
@@ -121,10 +125,12 @@ export const MultipartUpload: Upload = async (
   // failure is safe to retry instead of failing the whole upload.
   let initResp: InitResp | undefined
   for (let i = 0; ; i++) {
+    if (signal?.aborted) return
     initResp = await mpRequest<InitResp>(
-      r.post("/fs/multipart/init", undefined, { headers: initHeaders }),
+      r.post("/fs/multipart/init", undefined, { headers: initHeaders, signal }),
     )
     if (initResp) break
+    if (signal?.aborted) return
     if (i >= 2) throw new Error("multipart init failed: network error")
     await sleep(1000 * (i + 1))
   }
@@ -143,6 +149,7 @@ export const MultipartUpload: Upload = async (
       overwrite,
       rapid,
       seedOptions,
+      signal,
     )
   }
   const uploadId = session.upload_id
@@ -150,6 +157,18 @@ export const MultipartUpload: Upload = async (
   const total = session.total_chunks
   const chunkLen = (idx: number) =>
     idx === total - 1 ? file.size - idx * chunkSize : chunkSize
+
+  // Hook abort listener to tell the backend to discard the multipart session
+  const onAbort = () => {
+    if (uploadId) {
+      r.post("/fs/multipart/abort", undefined, {
+        headers: { "X-Upload-Id": uploadId },
+      }).catch(() => {})
+    }
+  }
+  if (signal) {
+    signal.addEventListener("abort", onAbort, { once: true })
+  }
 
   if (session.state === "completed") {
     // rapid upload finished before we sent a single chunk
@@ -173,11 +192,27 @@ export const MultipartUpload: Upload = async (
   let peakDone = ackedBytes
   let lastTime = Date.now()
   let lastBytes = ackedBytes
+  let latestStoragePct = session.storage_progress ?? 0
+  let maxReportedProgress = 0
+
+  const updateProgress = () => {
+    const clientPct = Math.min(100, (peakDone / file.size) * 100)
+    const storagePct = Math.min(100, Math.max(0, latestStoragePct))
+    // Weighted progress: client chunk upload is 80%, server storage sync is 20%
+    const computed = clientPct * 0.8 + storagePct * 0.2
+    // Strictly monotonic and capped at 99% until completed
+    maxReportedProgress = Math.max(
+      maxReportedProgress,
+      Math.min(99, Math.floor(computed)),
+    )
+    setUpload("progress", maxReportedProgress)
+  }
+
   const report = () => {
     let inflight = 0
     for (const v of Object.values(inflightLoaded)) inflight += v
     peakDone = Math.max(peakDone, Math.min(ackedBytes + inflight, file.size))
-    setUpload("progress", ((peakDone / file.size) * 100) | 0)
+    updateProgress()
     const now = Date.now()
     if (now - lastTime >= 1000) {
       setUpload("speed", ((peakDone - lastBytes) / (now - lastTime)) * 1000)
@@ -193,7 +228,7 @@ export const MultipartUpload: Upload = async (
     const blob = file.slice(idx * chunkSize, idx * chunkSize + chunkLen(idx))
     let flowRetries = 0
     for (;;) {
-      if (completedEarly || fatal) return
+      if (completedEarly || fatal || signal?.aborted) return
       // a transport failure (network hiccup, CDN-level rejection) yields
       // undefined — the probe below decides between resending and giving up
       const resp = await mpRequest<SnapResp>(
@@ -203,6 +238,7 @@ export const MultipartUpload: Upload = async (
             "X-Chunk-Index": idx,
             "Content-Type": "application/octet-stream",
           },
+          signal,
           onUploadProgress: (e: any) => {
             inflightLoaded[idx] = e.loaded ?? 0
             report()
@@ -210,8 +246,12 @@ export const MultipartUpload: Upload = async (
         }),
       )
       delete inflightLoaded[idx]
+      if (signal?.aborted) return
       if (resp && resp.code === 200) {
         ackedBytes += chunkLen(idx)
+        if (typeof resp.data?.storage_progress === "number") {
+          latestStoragePct = resp.data.storage_progress
+        }
         if (resp.data?.state === "completed") {
           completedEarly = true
         }
@@ -222,11 +262,12 @@ export const MultipartUpload: Upload = async (
         throw new Error(resp.message)
       }
       if (!resp) {
+        if (signal?.aborted) return
         // a rapid upload may have completed the session while this chunk was
         // mid-flight; the early server response surfaces as a network error —
         // ask the session before assuming the network actually failed
         const st = await mpRequest<SnapResp>(
-          r.get(`/fs/multipart/status?upload_id=${uploadId}`),
+          r.get(`/fs/multipart/status?upload_id=${uploadId}`, { signal }),
         )
         if (
           (st?.code === 200 && st.data.state === "completed") ||
@@ -260,12 +301,13 @@ export const MultipartUpload: Upload = async (
   let nextIdx = startFrom
   const worker = async () => {
     for (;;) {
-      if (completedEarly || fatal) return
+      if (completedEarly || fatal || signal?.aborted) return
       const i = nextIdx++
       if (i >= missing.length) return
       try {
         await sendChunk(missing[i])
       } catch (e: any) {
+        if (signal?.aborted) return
         fatal = e instanceof Error ? e : new Error(String(e))
         return
       }
@@ -274,6 +316,7 @@ export const MultipartUpload: Upload = async (
   await Promise.all(
     Array.from({ length: Math.min(INFLIGHT, missing.length) || 1 }, worker),
   )
+  if (signal?.aborted) return
   if (fatal) {
     throw fatal
   }
@@ -281,12 +324,14 @@ export const MultipartUpload: Upload = async (
   // every chunk is on the server; the driver is still writing to the storage
   setUpload("status", "backending")
   setUpload("speed", 0)
+  updateProgress()
   let settled = false
   // a CDN-cut connection resolves to undefined and the polling below takes
   // over; the catch is defensive — mpRequest throws only on cancellation
   const completePromise: Promise<SnapResp | undefined> = mpRequest<SnapResp>(
     r.post("/fs/multipart/complete", undefined, {
       headers: { "X-Upload-Id": uploadId },
+      signal,
     }),
   )
     .catch(() => undefined)
@@ -295,15 +340,18 @@ export const MultipartUpload: Upload = async (
     })
 
   while (!settled) {
+    if (signal?.aborted) return
     await sleep(2000)
-    if (settled) break
+    if (settled || signal?.aborted) break
     const st = await mpRequest<SnapResp>(
-      r.get(`/fs/multipart/status?upload_id=${uploadId}`),
+      r.get(`/fs/multipart/status?upload_id=${uploadId}`, { signal }),
     )
     if (st?.code === 200 && st.data.state === "receiving") {
-      setUpload("progress", st.data.storage_progress | 0)
+      latestStoragePct = st.data.storage_progress || 0
+      updateProgress()
     }
   }
+  if (signal?.aborted) return
   const fin = await completePromise
   if (fin) {
     if (fin.code !== 200) {
@@ -314,9 +362,11 @@ export const MultipartUpload: Upload = async (
   }
   // the complete request never came back — poll the session to its end
   for (;;) {
+    if (signal?.aborted) return
     await sleep(2000)
+    if (signal?.aborted) break
     const st = await mpRequest<SnapResp>(
-      r.get(`/fs/multipart/status?upload_id=${uploadId}`),
+      r.get(`/fs/multipart/status?upload_id=${uploadId}`, { signal }),
     )
     if (!st) {
       continue // transient blip while the driver finishes — keep polling
@@ -335,7 +385,8 @@ export const MultipartUpload: Upload = async (
         setUpload("progress", 100)
         return
       case "receiving":
-        setUpload("progress", st.data.storage_progress | 0)
+        latestStoragePct = st.data.storage_progress || 0
+        updateProgress()
         continue
       default:
         throw new Error(st.data.error || `upload failed (${st.data.state})`)

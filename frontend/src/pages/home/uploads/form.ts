@@ -11,7 +11,9 @@ export const FormUpload: Upload = async (
   overwrite = false,
   rapid = false,
   seedOptions,
+  signal,
 ): Promise<undefined> => {
+  if (signal?.aborted) return
   let oldTimestamp = new Date().valueOf()
   let oldLoaded = 0
   const form = new FormData()
@@ -30,6 +32,7 @@ export const FormUpload: Upload = async (
     const { md5, sha1, sha256 } = await calculateHash(file, (p) => {
       setUpload("progress", p | 0)
     })
+    if (signal?.aborted) return
     headers["X-File-Md5"] = md5
     headers["X-File-Sha1"] = sha1
     headers["X-File-Sha256"] = sha256
@@ -37,10 +40,13 @@ export const FormUpload: Upload = async (
   setUpload("status", "uploading")
   const resp: EmptyResp = await r.put("/fs/form", form, {
     headers: headers,
+    signal,
     onUploadProgress: (progressEvent) => {
       if (progressEvent.total) {
-        const complete =
-          ((progressEvent.loaded / progressEvent.total) * 100) | 0
+        const complete = Math.min(
+          99,
+          ((progressEvent.loaded / progressEvent.total) * 100) | 0,
+        )
         setUpload("progress", complete)
 
         const timestamp = new Date().valueOf()
@@ -57,13 +63,16 @@ export const FormUpload: Upload = async (
           oldLoaded = progressEvent.loaded
         }
 
-        if (complete === 100) {
+        if (progressEvent.loaded >= progressEvent.total) {
           setUpload("status", "backending")
+          setUpload("speed", 0)
         }
       }
     },
   })
+  if (signal?.aborted) return
   if (resp.code === 200) {
+    setUpload("progress", 100)
     return
   } else {
     throw new Error(resp.message)

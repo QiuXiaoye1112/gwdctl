@@ -31,7 +31,7 @@ import { bus, getFileSize, notify, r } from "~/utils"
 import { TaskInfo, Resp } from "~/types"
 import { me } from "~/store"
 import { UserMethods } from "~/types"
-import { uploadFiles } from "../uploads/Upload"
+import { uploadFiles, cancelUpload } from "../uploads/Upload"
 
 export const [runningTaskCount, setRunningTaskCount] = createSignal(0)
 
@@ -280,6 +280,31 @@ export const TasksDrawer = () => {
                         >
                           {up.progress.toFixed(0)}%
                         </Text>
+                      </HStack>
+                      <HStack
+                        justifyContent="space-between"
+                        alignItems="center"
+                        mt="$2"
+                      >
+                        <Text
+                          fontSize="$xs"
+                          color="$neutral9"
+                          noOfLines={1}
+                          maxW="75%"
+                          title={up.path}
+                        >
+                          {getFileSize(up.size)}
+                        </Text>
+                        <Button
+                          size="xs"
+                          colorScheme="danger"
+                          variant="subtle"
+                          onClick={() => cancelUpload(up.path)}
+                        >
+                          {localStorage.getItem("lang") === "en"
+                            ? "Cancel"
+                            : "取消"}
+                        </Button>
                       </HStack>
                     </Box>
                   )}
