@@ -38,7 +38,7 @@ export const getLinkByDirAndObj = (
   }
   const { inner_path, archive, pass: archive_pass } = obj as ArchiveObj
   if (archive) {
-    prefix = "/ae"
+    prefix = isShare ? "/sad" : "/ae"
     path = `${dir}/${archive.name}`
     path = encodePath(path, encodeAll)
   }
@@ -53,7 +53,7 @@ export const getLinkByDirAndObj = (
   if (type !== "preview" && isShare) {
     const pwd = cookieStorage.getItem("browser-password") || ""
     if (pwd) {
-      ans += `${QP()}pwd=${pwd}`
+      ans += `${QP()}pwd=${encodeURIComponent(pwd)}`
     }
   }
   if (archive) {

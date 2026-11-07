@@ -2,6 +2,7 @@ package handles
 
 import (
 	"fmt"
+	urlpkg "net/url"
 	stdpath "path"
 	"regexp"
 	"strings"
@@ -40,7 +41,7 @@ func SharingGet(c *gin.Context, req *FsGetReq) {
 		fakePath := fmt.Sprintf("/%s/%s", sid, path)
 		url = fmt.Sprintf("%s/sd%s", common.GetApiUrl(c), utils.EncodePath(fakePath, true))
 		if s.Pwd != "" {
-			url += "?pwd=" + s.Pwd
+			url += "?pwd=" + urlpkg.QueryEscape(s.Pwd)
 		}
 	}
 	thumb, _ := model.GetThumb(obj)
@@ -135,7 +136,7 @@ func SharingArchiveMeta(c *gin.Context, req *ArchiveMetaReq) {
 	fakePath := fmt.Sprintf("/%s/%s", sid, path)
 	url := fmt.Sprintf("%s/sad%s", common.GetApiUrl(c), utils.EncodePath(fakePath, true))
 	if s.Pwd != "" {
-		url += "?pwd=" + s.Pwd
+		url += "?pwd=" + urlpkg.QueryEscape(s.Pwd)
 	}
 	common.SuccessResp(c, ArchiveMetaResp{
 		Comment:     ret.GetComment(),

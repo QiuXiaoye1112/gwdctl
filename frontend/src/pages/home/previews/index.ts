@@ -186,15 +186,8 @@ const previews: Preview[] = [
     },
     component: lazy(() => import("./archive")),
     prior: () => {
-      const { isShare } = useRouter()
-      return (
-        (!isShare() &&
-          getSettingBool("preview_archives_by_default") &&
-          !getSettingBool("preview_download_by_default")) ||
-        (isShare() &&
-          getSettingBool("share_preview_archives_by_default") &&
-          !getSettingBool("share_preview_download_by_default"))
-      )
+      return getSettingBool("preview_archives_by_default") &&
+        !getSettingBool("preview_download_by_default")
     },
     availableInArchive: false,
   },
@@ -209,13 +202,12 @@ export const getPreviews = (
     ObjType[searchParams["type"]?.toUpperCase() as keyof typeof ObjType]
   const res: PreviewComponent[] = []
   const subsequent: PreviewComponent[] = []
-  const downloadPrior =
-    (!isShare() && getSettingBool("preview_download_by_default")) ||
-    (isShare() && getSettingBool("share_preview_download_by_default"))
+  const downloadPrior = getSettingBool("preview_download_by_default")
   const isInArchive = !!(file as ArchiveObj).archive
   // internal previews
   if (!isShare() || getSettingBool("share_preview")) {
     previews.forEach((preview) => {
+      if (isShare() && preview.key === "text_editor") return
       if (preview.provider && !preview.provider.test(file.provider)) {
         return
       }
@@ -281,7 +273,7 @@ export const getPreviews = (
     if (!isShare() || getSettingBool("share_preview")) {
       const textPreviewsToAdd = previews
         .filter((p) =>
-          ["markdown", "markdown_with_word_wrap", "text_editor"].includes(
+          (isShare() ? ["markdown", "markdown_with_word_wrap"] : ["markdown", "markdown_with_word_wrap", "text_editor"]).includes(
             p.key,
           ),
         )
