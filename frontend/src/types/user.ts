@@ -53,9 +53,9 @@ export const ActivePermissions = UserPermissions.map((name, index) => ({
 export const UserMethods = {
   is_guest: (user: User) => user.role === UserRole.GUEST,
   is_admin: (user: User) => user.role === UserRole.ADMIN,
-  is_general: (user: User) => user.role === UserRole.GENERAL,
-  can: (user: User, permission: number) => {
-    return ((user.permission >> permission) & 1) == 1
+  is_general: (_user: User) => false,
+  can: (user: User, _permission: number) => {
+    return user.role === UserRole.ADMIN
   },
   // can_see_hides: (user: User) =>
   //   UserMethods.is_admin(user) || (user.permission & 1) == 1,

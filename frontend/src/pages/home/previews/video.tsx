@@ -4,10 +4,7 @@ import { useRouter, useLink } from "~/hooks"
 import { getMainColor, getSettingBool, objStore } from "~/store"
 import { ObjType } from "~/types"
 import { ext, pathDir, pathJoin, safeJsonParse } from "~/utils"
-import Artplayer from "artplayer"
-import { type Option } from "artplayer/types/option"
-import { type Setting } from "artplayer/types/setting"
-import { type Events } from "artplayer/types/events"
+import Artplayer, { type Option, type Setting, type Events } from "artplayer"
 import artplayerProxyMediabunny from "~/components/artplayer-proxy-mediabunny"
 import { attachMediabunnyAudio } from "~/components/artplayer-proxy-mediabunny/AudioPatch"
 import { prefetchVideoChunks } from "~/components/artplayer-proxy-mediabunny/Prefetcher"
@@ -245,7 +242,7 @@ const Preview = () => {
 
           // sync menu subtitle tooltip
           const menu_sub = option.settings?.find(
-            (_) => _.id === "setting_subtitle",
+            (item: Setting) => item.id === "setting_subtitle",
           )
           menu_sub && (menu_sub.tooltip = item.tooltip)
 
@@ -313,13 +310,13 @@ const Preview = () => {
       switch (type) {
         case "ass":
           player.subtitle.show = false
-          player.emit("artplayer-plugin-ass:visible" as keyof Events, visible)
+          player.emit("artplayer-plugin-ass:visible", visible)
           break
 
         case "webvtt":
         default:
           player.subtitle.show = visible
-          player.emit("artplayer-plugin-ass:visible" as keyof Events, false)
+          player.emit("artplayer-plugin-ass:visible", false)
           break
       }
     }
@@ -390,7 +387,6 @@ const Preview = () => {
     player = new Artplayer(option)
     // "仅音频"模式：原生 <video> 解码视频，mediabunny 只提供音轨（仅直链模式）
     if (
-      !useTranscode &&
       getMediaBunnyMode() === "audio_only" &&
       objStore.raw_url
     ) {

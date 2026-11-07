@@ -2,7 +2,6 @@ package common
 
 import (
 	"path"
-	"slices"
 	"strings"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
@@ -19,24 +18,10 @@ func IsStorageSignEnabled(rawPath string) bool {
 }
 
 func CanRead(user *model.User, meta *model.Meta, path string) bool {
-	// nil user is treated as internal/system context and bypasses per-user read restrictions
-	if user == nil {
-		return true
-	}
-	if meta != nil && len(meta.ReadUsers) > 0 && !slices.Contains(meta.ReadUsers, user.ID) && MetaCoversPath(meta.Path, path, meta.ReadUsersSub) {
-		return false
-	}
 	return true
 }
 
 func CanWrite(user *model.User, meta *model.Meta, path string) bool {
-	// nil user is treated as internal/system context and bypasses per-user write restrictions
-	if user == nil {
-		return true
-	}
-	if meta != nil && len(meta.WriteUsers) > 0 && !slices.Contains(meta.WriteUsers, user.ID) && MetaCoversPath(meta.Path, path, meta.WriteUsersSub) {
-		return false
-	}
 	return true
 }
 

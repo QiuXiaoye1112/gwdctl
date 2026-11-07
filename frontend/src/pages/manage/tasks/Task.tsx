@@ -20,7 +20,6 @@ import { useT, useFetch } from "~/hooks"
 import { PEmptyResp } from "~/types"
 import { handleResp, notify, r } from "~/utils"
 import { TaskAttribute, TaskLocalSetter, TasksProps } from "./Tasks"
-import { me } from "~/store"
 
 enum TaskStateEnum {
   Pending,
@@ -51,23 +50,6 @@ const StateMap: Record<
   [TaskStateEnum.Canceled]: "neutral",
 }
 
-const Creator = (props: { name: string; role: number }) => {
-  if (props.role < 0) return null
-  const roleColors = ["info", "neutral", "accent"]
-  return (
-    <Badge
-      colorScheme={roleColors[props.role] as any}
-      css={{
-        overflow: "hidden",
-        whiteSpace: "nowrap",
-        textOverflow: "ellipsis",
-      }}
-    >
-      {props.name}
-    </Badge>
-  )
-}
-
 export const TaskState = (props: { state: number }) => {
   const t = useT()
   return (
@@ -77,7 +59,7 @@ export const TaskState = (props: { state: number }) => {
   )
 }
 
-export type TaskOrderBy = "name" | "creator" | "state" | "progress"
+export type TaskOrderBy = "name" | "state" | "progress"
 
 export interface TaskCol {
   name: TaskOrderBy | "speed" | "operation"
@@ -86,12 +68,7 @@ export interface TaskCol {
 }
 
 export const cols: TaskCol[] = [
-  {
-    name: "name",
-    textAlign: "left",
-    w: me().role === 2 ? "calc(100% - 660px)" : "calc(100% - 560px)",
-  },
-  { name: "creator", textAlign: "center", w: me().role === 2 ? "100px" : "0" },
+  { name: "name", textAlign: "left", w: "calc(100% - 560px)" },
   { name: "state", textAlign: "center", w: "100px" },
   { name: "progress", textAlign: "left", w: "140px" },
   { name: "speed", textAlign: "center", w: "100px" },
@@ -198,16 +175,11 @@ export const Task = (props: TaskAttribute & TasksProps & TaskLocalSetter) => {
             {title}
           </Heading>
         </HStack>
-        <Show when={me().role === 2}>
-          <Center w={cols[1].w}>
-            <Creator name={props.creator} role={props.creator_role} />
-          </Center>
-        </Show>
-        <Center w={cols[2].w}>
+        <Center w={cols[1].w}>
           <TaskState state={props.state} />
         </Center>
         <Progress
-          w={cols[3].w}
+          w={cols[2].w}
           trackColor="$info3"
           rounded="$full"
           size="sm"
@@ -217,7 +189,7 @@ export const Task = (props: TaskAttribute & TasksProps & TaskLocalSetter) => {
           <ProgressIndicator color="$info8" rounded="$md" />
           {/* <ProgressLabel /> */}
         </Progress>
-        <Center w={cols[1].w}>
+        <Center w={cols[3].w}>
           <Text
             size="sm"
             css={{
@@ -229,7 +201,7 @@ export const Task = (props: TaskAttribute & TasksProps & TaskLocalSetter) => {
             {speedText}
           </Text>
         </Center>
-        <Flex w={cols[5].w} gap="$1">
+        <Flex w={cols[4].w} gap="$1">
           <Spacer />
           <Show when={props.canRetry}>
             <Button

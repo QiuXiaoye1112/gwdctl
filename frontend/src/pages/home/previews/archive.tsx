@@ -575,7 +575,7 @@ const Preview = () => {
                   <Dynamic
                     component={currentPreview()?.component}
                     images={files().filter((f) => f.type === ObjType.IMAGE)}
-                    navigate={(name) => {
+                    navigate={(name: string) => {
                       changeFile(name)
                     }}
                   />

@@ -2,6 +2,7 @@ export interface InitSetupRequest {
   username: string
   password: string
   site_title: string
+  token?: string
 }
 
 /**

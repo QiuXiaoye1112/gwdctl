@@ -24,7 +24,6 @@ import { useFetch, useT } from "~/hooks"
 import { PEmptyResp, PResp, TaskInfo } from "~/types"
 import { handleResp, notify, r } from "~/utils"
 import { TaskCol, cols, Task, TaskOrderBy, TaskLocal } from "./Task"
-import { me } from "~/store"
 
 export interface TaskNameAnalyzer {
   regex: RegExp
@@ -75,14 +74,6 @@ export const Tasks = (props: TasksProps) => {
   const [orderReverse, setOrderReverse] = createSignal(false)
   const sorter: Record<TaskOrderBy, (a: TaskInfo, b: TaskInfo) => number> = {
     name: (a, b) => (a.name > b.name ? 1 : -1),
-    creator: (a, b) =>
-      a.creator === b.creator
-        ? a.id > b.id
-          ? 1
-          : -1
-        : a.creator > b.creator
-          ? 1
-          : -1,
     state: (a, b) =>
       a.state === b.state ? (a.id > b.id ? 1 : -1) : a.state > b.state ? 1 : -1,
     progress: (a, b) =>
@@ -176,12 +167,9 @@ export const Tasks = (props: TasksProps) => {
       setRegexCompileFailed(true)
     }
   })
-  const [showOnlyMine, setShowOnlyMine] = createSignal(me().role !== 2)
   const taskFilter = createMemo(() => {
     const regex = regexFilter()
-    const mine = showOnlyMine()
-    return (task: TaskInfo): boolean =>
-      regex.test(task.name) && (!mine || task.creator === me().username)
+    return (task: TaskInfo): boolean => regex.test(task.name)
   })
   const filteredTask = createMemo(() => {
     return tasks().filter(taskFilter())
@@ -351,14 +339,6 @@ export const Tasks = (props: TasksProps) => {
           onInput={(e: any) => setRegexFilterValue(e.target.value as string)}
           invalid={regexCompileFailed()}
         />
-        <Show when={me().role === 2}>
-          <Checkbox
-            checked={showOnlyMine()}
-            onChange={(e: any) => setShowOnlyMine(e.target.checked as boolean)}
-          >
-            {t(`tasks.show_only_mine`)}
-          </Checkbox>
-        </Show>
       </HStack>
       <VStack
         w={{ "@initial": "1024px", "@lg": "$full" }}
@@ -380,15 +360,13 @@ export const Tasks = (props: TasksProps) => {
               {t(`tasks.attr.${cols[0].name}`)}
             </Text>
           </HStack>
-          <Show when={me().role === 2}>
-            <Text
-              w={cols[1].w}
-              {...itemProps(cols[1])}
-              {...itemPropsSort(cols[1])}
-            >
-              {t(`tasks.attr.${cols[1].name}`)}
-            </Text>
-          </Show>
+          <Text
+            w={cols[1].w}
+            {...itemProps(cols[1])}
+            {...itemPropsSort(cols[1])}
+          >
+            {t(`tasks.attr.${cols[1].name}`)}
+          </Text>
           <Text
             w={cols[2].w}
             {...itemProps(cols[2])}
@@ -396,20 +374,13 @@ export const Tasks = (props: TasksProps) => {
           >
             {t(`tasks.attr.${cols[2].name}`)}
           </Text>
-          <Text
-            w={cols[3].w}
-            {...itemProps(cols[3])}
-            {...itemPropsSort(cols[3])}
-          >
+          <Text w={cols[3].w} {...itemProps(cols[3])}>
             {t(`tasks.attr.${cols[3].name}`)}
           </Text>
-          <Text w={cols[4].w} {...itemProps(cols[4])}>
-            {t(`tasks.attr.${cols[4].name}`)}
-          </Text>
-          <Flex w={cols[5].w} gap="$2">
+          <Flex w={cols[4].w} gap="$2">
             <Spacer />
-            <Text {...itemProps(cols[5])}>
-              {t(`tasks.attr.${cols[5].name}`)}
+            <Text {...itemProps(cols[4])}>
+              {t(`tasks.attr.${cols[4].name}`)}
             </Text>
             <Button
               size="xs"

@@ -37,29 +37,40 @@ type File struct {
 	SHA256Checksum string `json:"sha256Checksum"`
 }
 
-func fileToObj(f File) *model.ObjThumb {
+type GoogleDriveObj struct {
+	model.ObjThumb
+	TargetID string
+}
+
+func (g *GoogleDriveObj) GetTargetID() string {
+	return g.TargetID
+}
+
+func fileToObj(f File) model.Obj {
 	log.Debugf("google file: %+v", f)
 	size, _ := strconv.ParseInt(f.Size, 10, 64)
-	obj := &model.ObjThumb{
-		Object: model.Object{
-			ID:       f.Id,
-			Name:     f.Name,
-			Size:     size,
-			Ctime:    f.CreatedTime,
-			Modified: f.ModifiedTime,
-			IsFolder: f.MimeType == "application/vnd.google-apps.folder",
-			HashInfo: utils.NewHashInfoByMap(map[*utils.HashType]string{
-				utils.MD5:    f.MD5Checksum,
-				utils.SHA1:   f.SHA1Checksum,
-				utils.SHA256: f.SHA256Checksum,
-			}),
-		},
-		Thumbnail: model.Thumbnail{
-			Thumbnail: f.ThumbnailLink,
+	obj := &GoogleDriveObj{
+		ObjThumb: model.ObjThumb{
+			Object: model.Object{
+				ID:       f.Id,
+				Name:     f.Name,
+				Size:     size,
+				Ctime:    f.CreatedTime,
+				Modified: f.ModifiedTime,
+				IsFolder: f.MimeType == "application/vnd.google-apps.folder",
+				HashInfo: utils.NewHashInfoByMap(map[*utils.HashType]string{
+					utils.MD5:    f.MD5Checksum,
+					utils.SHA1:   f.SHA1Checksum,
+					utils.SHA256: f.SHA256Checksum,
+				}),
+			},
+			Thumbnail: model.Thumbnail{
+				Thumbnail: f.ThumbnailLink,
+			},
 		},
 	}
 	if f.MimeType == "application/vnd.google-apps.shortcut" {
-		obj.ID = f.ShortcutDetails.TargetId
+		obj.TargetID = f.ShortcutDetails.TargetId
 		obj.IsFolder = f.ShortcutDetails.TargetMimeType == "application/vnd.google-apps.folder"
 	}
 	return obj

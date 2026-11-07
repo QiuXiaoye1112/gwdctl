@@ -6,16 +6,14 @@ import {
   Tbody,
   Th,
   Thead,
-  Tooltip,
   Tr,
   VStack,
 } from "@hope-ui/solid"
-import { createSignal, For, Show } from "solid-js"
+import { createSignal, For } from "solid-js"
 import { useFetch, useManageTitle, useRouter, useT } from "~/hooks"
-import { PageResp, ShareInfo, UserMethods, UserPermissions } from "~/types"
+import { PageResp, ShareInfo } from "~/types"
 import { handleResp, r } from "~/utils"
 import { ShareListItem } from "./Share"
-import { me } from "~/store"
 
 const Shares = () => {
   const t = useT()
@@ -29,10 +27,6 @@ const Shares = () => {
     const resp = await getShares()
     handleResp(resp, (data) => setShares(data.content))
   }
-  const canShare = UserMethods.can(
-    me(),
-    UserPermissions.findIndex((item) => item === "share"),
-  )
   refresh()
   return (
     <VStack spacing="$3" alignItems="start" w="$full">
@@ -52,34 +46,15 @@ const Shares = () => {
         >
           {t("global.refresh")}
         </Button>
-        <Show
-          when={!canShare}
-          fallback={
-            <Button onClick={() => to("/@manage/shares/add")}>
-              {t("global.add")}
-            </Button>
-          }
-        >
-          <Tooltip
-            withArrow
-            label={t("shares.no_permission_tip")}
-            placement="right"
-          >
-            <Button disabled> {t("global.add")} </Button>
-          </Tooltip>
-        </Show>
+        <Button onClick={() => to("/@manage/shares/add")}>
+          {t("global.add")}
+        </Button>
       </HStack>
       <Box w="$full" overflowX="auto">
         <Table highlightOnHover dense>
           <Thead>
             <Tr>
-              <For each={["files", "id"]}>
-                {(title) => <Th>{t(`shares.${title}`)}</Th>}
-              </For>
-              <Show when={UserMethods.is_admin(me())}>
-                <Th>{t(`shares.creator`)}</Th>
-              </Show>
-              <For each={["expires", "accessed", "status", "remark"]}>
+              <For each={["files", "id", "expires", "accessed", "status", "remark"]}>
                 {(title) => <Th>{t(`shares.${title}`)}</Th>}
               </For>
               <Th>{t("global.operations")}</Th>
@@ -91,7 +66,6 @@ const Shares = () => {
                 <ShareListItem
                   share={share}
                   refresh={refresh}
-                  canShare={canShare}
                 />
               )}
             </For>

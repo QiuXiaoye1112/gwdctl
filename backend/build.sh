@@ -97,6 +97,12 @@ AssertStaticBinary() {
 }
 
 FetchWebRolling() {
+  if [ -d "../frontend/dist" ] && [ "$(ls -A ../frontend/dist)" ]; then
+    echo "Using local ../frontend/dist build output..."
+    rm -rf public/dist && mkdir -p public/dist
+    cp -r ../frontend/dist/* public/dist/
+    return 0
+  fi
   if [ -d "public/dist" ] && [ "$(ls -A public/dist)" ]; then
     echo "public/dist already exists, skipping FetchWebRolling"
     return 0
@@ -114,6 +120,12 @@ FetchWebRolling() {
 }
 
 FetchWebRelease() {
+  if [ -d "../frontend/dist" ] && [ "$(ls -A ../frontend/dist)" ]; then
+    echo "Using local ../frontend/dist build output..."
+    rm -rf public/dist && mkdir -p public/dist
+    cp -r ../frontend/dist/* public/dist/
+    return 0
+  fi
   if [ -d "public/dist" ] && [ "$(ls -A public/dist)" ]; then
     echo "public/dist already exists, skipping FetchWebRelease"
     return 0

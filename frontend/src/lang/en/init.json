@@ -5,6 +5,7 @@
   "password-tips": "Set admin password",
   "confirm_password-tips": "Confirm password",
   "site_title-tips": "Site title",
+  "token-tips": "Setup Token (CLI: gwd admin token or config.json)",
   "setup": "Initialize",
   "success": "Initialized successfully, please login",
   "failed": "Initialization failed",

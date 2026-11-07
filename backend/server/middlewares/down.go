@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"crypto/subtle"
 	"strings"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
@@ -21,6 +22,27 @@ func PathParse(c *gin.Context) {
 	c.Next()
 }
 
+func isOwnerRequest(c *gin.Context) bool {
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		token = c.Query("token")
+	}
+	apiToken := setting.GetStr(conf.Token)
+	if apiToken != "" && token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(apiToken)) == 1 {
+		return true
+	}
+	if token != "" {
+		claims, err := common.ParseToken(token)
+		if err == nil && claims != nil {
+			admin, err := op.GetAdmin()
+			if err == nil && admin != nil && !admin.Disabled && claims.Username == admin.Username && claims.PwdTS == admin.PwdTS {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func Down(verifyFunc func(string, string) error) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		rawPath := c.Request.Context().Value(conf.PathKey).(string)
@@ -30,6 +52,13 @@ func Down(verifyFunc func(string, string) error) func(c *gin.Context) {
 			return
 		}
 		common.GinAppendValues(c, conf.MetaKey, meta)
+
+		// Owner has direct access via header/token
+		if isOwnerRequest(c) {
+			c.Next()
+			return
+		}
+
 		// verify sign
 		if needSign(meta, rawPath) {
 			s := c.Query("sign")
@@ -55,6 +84,10 @@ func needSign(meta *model.Meta, path string) bool {
 		return true
 	}
 	if common.IsStorageSignEnabled(path) {
+		return true
+	}
+	guest, err := op.GetGuest()
+	if err == nil && guest.Disabled {
 		return true
 	}
 	if meta == nil || meta.Password == "" {

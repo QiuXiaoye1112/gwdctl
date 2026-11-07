@@ -359,9 +359,8 @@ type SharingResp struct {
 
 func GetSharing(c *gin.Context) {
 	sid := c.Query("id")
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
 	s, err := op.GetSharingById(sid)
-	if err != nil || (!user.IsAdmin() && s.Creator.ID != user.ID) {
+	if err != nil {
 		common.ErrorStrResp(c, "sharing not found", 404)
 		return
 	}
@@ -379,15 +378,7 @@ func ListSharings(c *gin.Context) {
 		return
 	}
 	req.Validate()
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	var sharings []model.Sharing
-	var total int64
-	var err error
-	if user.IsAdmin() {
-		sharings, total, err = op.GetSharings(req.Page, req.PerPage)
-	} else {
-		sharings, total, err = op.GetSharingsByCreatorId(user.ID, req.Page, req.PerPage)
-	}
+	sharings, total, err := op.GetSharings(req.Page, req.PerPage)
 	if err != nil {
 		common.ErrorResp(c, err, 500, true)
 		return
@@ -442,41 +433,15 @@ func UpdateSharing(c *gin.Context) {
 		common.ErrorStrResp(c, "must add at least 1 object", 400)
 		return
 	}
-	var user *model.User
-	var err error
-	reqUser := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if reqUser.IsAdmin() {
-		if req.CreatorName != "" {
-			user, err = op.GetUserByName(req.CreatorName)
-			if err != nil {
-				common.ErrorStrResp(c, "no such a user", 400)
-				return
-			}
-		} else {
-			user = reqUser
-		}
-	} else {
-		user = reqUser
-		if !user.CanShare() {
-			common.ErrorStrResp(c, "permission denied", 403)
-			return
-		}
-	}
+	user := c.Request.Context().Value(conf.UserKey).(*model.User)
 	for i, s := range req.Files {
 		s = utils.FixAndCleanPath(s)
 		req.Files[i] = s
-		if !reqUser.IsAdmin() && !utils.IsSubPath(user.BasePath, s) {
-			common.ErrorStrResp(c, fmt.Sprintf("permission denied to share path [%s]", s), 500)
-			return
-		}
 	}
 	s, err := op.GetSharingById(req.ID)
-	if err != nil || (!reqUser.IsAdmin() && s.CreatorId != user.ID) {
+	if err != nil {
 		common.ErrorStrResp(c, "sharing not found", 404)
 		return
-	}
-	if reqUser.IsAdmin() && req.CreatorName == "" {
-		user = s.Creator
 	}
 	s.Files = req.Files
 	s.Expires = req.Expires
@@ -490,10 +455,6 @@ func UpdateSharing(c *gin.Context) {
 	s.Remark = req.Remark
 	s.Creator = user
 	if req.NewID != "" && req.NewID != req.ID {
-		if !reqUser.CanCustomizeShareID() {
-			common.ErrorStrResp(c, "permission denied", 403)
-			return
-		}
 		if err = validateSharingID(req.NewID); err != nil {
 			common.ErrorResp(c, err, 400)
 			return
@@ -531,32 +492,10 @@ func CreateSharing(c *gin.Context) {
 			return
 		}
 	}
-	var user *model.User
-	reqUser := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if reqUser.IsAdmin() {
-		if req.CreatorName != "" {
-			user, err = op.GetUserByName(req.CreatorName)
-			if err != nil {
-				common.ErrorStrResp(c, "no such a user", 400)
-				return
-			}
-		} else {
-			user = reqUser
-		}
-	} else {
-		user = reqUser
-		if !user.CanShare() || (!user.CanCustomizeShareID() && req.ID != "") {
-			common.ErrorStrResp(c, "permission denied", 403)
-			return
-		}
-	}
+	user := c.Request.Context().Value(conf.UserKey).(*model.User)
 	for i, s := range req.Files {
 		s = utils.FixAndCleanPath(s)
 		req.Files[i] = s
-		if !reqUser.IsAdmin() && !utils.IsSubPath(user.BasePath, s) {
-			common.ErrorStrResp(c, fmt.Sprintf("permission denied to share path [%s]", s), 500)
-			return
-		}
 	}
 	s := &model.Sharing{
 		SharingDB: &model.SharingDB{
@@ -589,13 +528,11 @@ func CreateSharing(c *gin.Context) {
 
 func DeleteSharing(c *gin.Context) {
 	sid := c.Query("id")
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	s, err := op.GetSharingById(sid)
-	if err != nil || (!user.IsAdmin() && s.CreatorId != user.ID) {
+	if _, err := op.GetSharingById(sid); err != nil {
 		common.ErrorResp(c, err, 404)
 		return
 	}
-	if err = op.DeleteSharing(sid); err != nil {
+	if err := op.DeleteSharing(sid); err != nil {
 		common.ErrorResp(c, err, 500)
 	} else {
 		common.SuccessResp(c)
@@ -605,9 +542,8 @@ func DeleteSharing(c *gin.Context) {
 func SetEnableSharing(disable bool) func(ctx *gin.Context) {
 	return func(c *gin.Context) {
 		sid := c.Query("id")
-		user := c.Request.Context().Value(conf.UserKey).(*model.User)
 		s, err := op.GetSharingById(sid)
-		if err != nil || (!user.IsAdmin() && s.CreatorId != user.ID) {
+		if err != nil {
 			common.ErrorStrResp(c, "sharing not found", 404)
 			return
 		}

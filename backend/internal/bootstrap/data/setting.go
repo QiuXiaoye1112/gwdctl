@@ -161,7 +161,7 @@ func InitialSettings() []model.SettingItem {
 		{Key: conf.HideFiles, Value: "", Type: conf.TypeText, Group: model.GLOBAL},
 		{Key: "package_download", Value: "true", Type: conf.TypeBool, Group: model.GLOBAL},
 		{Key: conf.LinkExpiration, Value: "0", Type: conf.TypeNumber, Group: model.GLOBAL, Flag: model.PRIVATE},
-		{Key: conf.SignAll, Value: "false", Type: conf.TypeBool, Group: model.GLOBAL, Flag: model.PRIVATE},
+		{Key: conf.SignAll, Value: "true", Type: conf.TypeBool, Group: model.GLOBAL, Flag: model.PRIVATE},
 		{Key: conf.ShareSummaryContent, Value: "{{base_url}}/@s/{{id}}{{#if pwd}} 提取码: {{pwd}}{{/if}}", Type: conf.TypeText, Group: model.GLOBAL, Flag: model.PUBLIC},
 		{Key: conf.IgnoreSystemFiles, Value: "true", Type: conf.TypeBool, Group: model.GLOBAL, Flag: model.PRIVATE},
 

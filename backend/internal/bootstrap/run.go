@@ -78,6 +78,7 @@ func Start() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	_ = r.SetTrustedProxies(nil)
 
 	// gin log
 	if conf.Conf.Log.Filter.Enable {

@@ -1,6 +1,6 @@
-import { PEmptyResp, ShareInfo, UserMethods } from "~/types"
+import { PEmptyResp, ShareInfo } from "~/types"
 import { useFetch, useRouter, useT, useUtil } from "~/hooks"
-import { Badge, Button, HStack, Td, Tr } from "@hope-ui/solid"
+import { Button, HStack, Td, Tr } from "@hope-ui/solid"
 import {
   handleResp,
   handleRespWithNotifySuccess,
@@ -10,13 +10,11 @@ import {
   r,
 } from "~/utils"
 import { DeletePopover } from "../common/DeletePopover"
-import { getSetting, me } from "~/store"
-import { Show } from "solid-js"
+import { getSetting } from "~/store"
 
 interface ShareProps {
   share: ShareInfo
   refresh: () => void
-  canShare: boolean
 }
 
 function ShareOp(props: ShareProps) {
@@ -33,7 +31,6 @@ function ShareOp(props: ShareProps) {
   return (
     <>
       <Button
-        disabled={!props.canShare}
         onClick={() => {
           to(`/@manage/shares/edit/${props.share.id}`)
         }}
@@ -64,23 +61,6 @@ function ShareOp(props: ShareProps) {
         }}
       />
     </>
-  )
-}
-
-const Creator = (props: { name: string; role: number }) => {
-  if (props.role < 0) return null
-  const roleColors = ["info", "neutral", "accent"]
-  return (
-    <Badge
-      colorScheme={roleColors[props.role] as any}
-      css={{
-        overflow: "hidden",
-        whiteSpace: "nowrap",
-        textOverflow: "ellipsis",
-      }}
-    >
-      {props.name}
-    </Badge>
   )
 }
 
@@ -115,9 +95,6 @@ export function ShareListItem(props: ShareProps) {
     ) {
       return "invalid"
     }
-    if (props.share.creator === me().username && !props.canShare) {
-      return "denied"
-    }
     return "work"
   }
   const { copy } = useUtil()
@@ -125,11 +102,6 @@ export function ShareListItem(props: ShareProps) {
     <Tr>
       <Td>{path()}</Td>
       <Td>{props.share.id}</Td>
-      <Show when={UserMethods.is_admin(me())}>
-        <Td>
-          <Creator name={props.share.creator} role={props.share.creator_role} />
-        </Td>
-      </Show>
       <Td>
         {props.share.expires
           ? new Date(props.share.expires).toLocaleString()

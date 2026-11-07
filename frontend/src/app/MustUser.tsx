@@ -2,7 +2,7 @@ import { createSignal, JSXElement, Match, onMount, Switch } from "solid-js"
 import { Error, FullScreenLoading } from "~/components"
 import { useFetch, useT } from "~/hooks"
 import { Me, setMe } from "~/store"
-import { PResp } from "~/types"
+import { PResp, UserRole } from "~/types"
 import { r, handleResp, handleRespWithoutAuthAndNotify } from "~/utils"
 
 const MustUser = (props: { children: JSXElement }) => {
@@ -31,11 +31,11 @@ const UserOrGuest = (props: { children: JSXElement }) => {
   onMount(async () => {
     handleRespWithoutAuthAndNotify(await data(), setMe, (_msg, _code) => {
       setMe({
-        id: 2,
+        id: 0,
         username: "guest",
         password: "",
         base_path: "/",
-        role: 1,
+        role: UserRole.GUEST,
         disabled: false,
         permission: 0,
         sso_id: "",

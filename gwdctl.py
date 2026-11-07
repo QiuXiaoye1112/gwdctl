@@ -170,10 +170,6 @@ def set_admin_account():
             VALUES (?, ?, ?, ?, '', '/', 2, 0, 65535, '', '', '[]', 0)
         """, (username, pwd_hash, pwd_ts, salt))
 
-    c.execute("UPDATE x_setting_items SET value = 'Google Drive' WHERE key = 'site_title'")
-    c.execute("UPDATE x_setting_items SET value = '' WHERE key IN ('announcement', 'hide_files')")
-    c.execute("UPDATE x_setting_items SET value = 'true' WHERE key IN ('ignore_system_files', 'auto_update_index')")
-    c.execute("UPDATE x_setting_items SET value = 'false' WHERE key = 'sign_all'")
     conn.commit()
     conn.close()
     print(f"{C_GREEN}✓ 网页管理员账号已更新！用户名: {username}{C_RESET}")
@@ -432,7 +428,9 @@ def test_connection():
         with urllib.request.urlopen(r, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("code") == 200:
-                items = [f["name"] for f in data.get("data", {}).get("content", [])]
+                data_obj = data.get("data") or {}
+                content = data_obj.get("content") or []
+                items = [f["name"] for f in content if isinstance(f, dict) and "name" in f]
                 print(f"{C_GREEN}✓ 连接测试成功！Google Drive 正常响应。{C_RESET}")
                 print(f"  根目录文件样例: {items}\n")
             else:

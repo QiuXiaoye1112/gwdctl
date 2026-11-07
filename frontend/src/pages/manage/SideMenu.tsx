@@ -3,8 +3,6 @@ import { createMemo, createSignal, For, Match, Show, Switch } from "solid-js"
 import { useRouter, useT } from "~/hooks"
 import { BiSolidRightArrow } from "solid-icons/bi"
 import { onClose } from "./Header"
-import { UserMethods, UserRole } from "~/types"
-import { me } from "~/store"
 import { AnchorWithBase } from "~/components"
 import { Link } from "@solidjs/router"
 import { hoverColor, joinBase } from "~/utils"
@@ -26,11 +24,6 @@ export interface SideMenuItemProps {
 const SideMenuItem = (props: SideMenuItemProps) => {
   const ifShow = createMemo(() => {
     if (props.backend && !props.backend.includes(getBackendKind())) return false
-    if (!UserMethods.is_admin(me())) {
-      if (props.role === undefined) return false
-      else if (props.role === UserRole.GENERAL && !UserMethods.is_general(me()))
-        return false
-    }
     return true
   })
   return (

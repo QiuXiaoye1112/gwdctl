@@ -3,7 +3,7 @@ import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
 import { MaybeLoading } from "./FullLoading"
 import loader from "@monaco-editor/loader"
 import { useCDN } from "~/hooks"
-import type * as monacoType from "monaco-editor/esm/vs/editor/editor.api.js"
+import type * as monacoType from "monaco-editor"
 import { local } from "~/store"
 
 export interface MonacoEditorProps {

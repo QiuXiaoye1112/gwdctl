@@ -15,7 +15,7 @@ import {
 } from "@hope-ui/solid"
 import { createShortcut } from "@solid-primitives/keyboard"
 import { useBeforeLeave } from "@solidjs/router"
-import type * as monacoType from "monaco-editor/esm/vs/editor/editor.api.js"
+import type * as monacoType from "monaco-editor"
 import { BiRegularRedo, BiRegularUndo } from "solid-icons/bi"
 import { FaSolidMinus, FaSolidPlus } from "solid-icons/fa"
 import {
@@ -173,7 +173,7 @@ function Editor(props: { data?: string | ArrayBuffer; contentType?: string }) {
     setEditor(ed)
 
     // Track cursor position
-    ed.onDidChangeCursorPosition((e) => {
+    ed.onDidChangeCursorPosition((e: monacoType.editor.ICursorPositionChangedEvent) => {
       setCursorLine(e.position.lineNumber)
       setCursorColumn(e.position.column)
     })

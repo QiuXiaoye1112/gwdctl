@@ -28,7 +28,7 @@ import { RiSystemRefreshLine } from "solid-icons/ri"
 import { IoClose } from "solid-icons/io"
 import { useT, useRouter, usePath } from "~/hooks"
 import { bus, getFileSize, notify, r } from "~/utils"
-import { TaskInfo } from "~/types"
+import { TaskInfo, Resp } from "~/types"
 import { me } from "~/store"
 import { UserMethods } from "~/types"
 import { uploadFiles } from "../uploads/Upload"
@@ -100,7 +100,7 @@ export const TasksDrawer = () => {
       const results = await Promise.all(
         TASK_CATEGORIES.map(async (cat) => {
           try {
-            const res = await r.get(`/task/${cat.type}/undone`)
+            const res = (await r.get(`/task/${cat.type}/undone`)) as Resp<TaskInfo[]>
             if (res.code === 200 && Array.isArray(res.data)) {
               return res.data.map((item: TaskInfo) => ({
                 ...item,
@@ -129,7 +129,7 @@ export const TasksDrawer = () => {
   const cancelTask = async (taskType: string, tid: string) => {
     setCancelingId(tid)
     try {
-      const res = await r.post(`/task/${taskType}/cancel?tid=${tid}`)
+      const res = (await r.post(`/task/${taskType}/cancel?tid=${tid}`)) as Resp<any>
       if (res.code === 200) {
         notify.success(t("tasks.state.4") || "已取消")
         await fetchRunningTasks()

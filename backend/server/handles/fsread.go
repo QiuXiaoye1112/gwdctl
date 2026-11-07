@@ -226,7 +226,7 @@ func pagination(objs []model.Obj, req *model.PageReq) (int, []model.Obj) {
 }
 
 func toObjsResp(objs []model.Obj, parent string, encrypt bool) []ObjResp {
-	var resp []ObjResp
+	resp := make([]ObjResp, 0, len(objs))
 	for _, obj := range objs {
 		thumb, _ := model.GetThumb(obj)
 		mountDetails, _ := model.GetStorageDetails(obj)

@@ -139,6 +139,7 @@ type Config struct {
 	MCP                   MCP         `json:"mcp" envPrefix:"MCP_"`
 	LastLaunchedVersion   string      `json:"last_launched_version"`
 	ProxyAddress          string      `json:"proxy_address" env:"PROXY_ADDRESS"`
+	SetupToken            string      `json:"setup_token" env:"SETUP_TOKEN"`
 }
 
 func DefaultConfig(dataDir string) *Config {
@@ -148,7 +149,7 @@ func DefaultConfig(dataDir string) *Config {
 	dbPath := filepath.Join(dataDir, "data.db")
 	return &Config{
 		Scheme: Scheme{
-			Address:    "0.0.0.0",
+			Address:    "127.0.0.1",
 			UnixFile:   "",
 			HttpPort:   5244,
 			HttpsPort:  -1,

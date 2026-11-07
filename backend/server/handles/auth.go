@@ -58,6 +58,12 @@ func loginHash(c *gin.Context, req *LoginReq) {
 		model.LoginCache.Set(ip, count+1, cache.WithEx[int](model.DefaultLockDuration))
 		return
 	}
+	owner, err := op.GetOwner()
+	if err != nil || user.ID != owner.ID || !user.IsAdmin() || user.Disabled {
+		common.ErrorStrResp(c, model.InvalidUsernameOrPassword, 401)
+		model.LoginCache.Set(ip, count+1, cache.WithEx[int](model.DefaultLockDuration))
+		return
+	}
 	// validate password hash
 	if err := user.ValidatePwdStaticHash(req.Password); err != nil {
 		common.ErrorStrResp(c, model.InvalidUsernameOrPassword, 401)
@@ -102,14 +108,19 @@ func CurrentUser(c *gin.Context) {
 	common.SuccessResp(c, userResp)
 }
 
+type UpdateCurrentReq struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password"`
+}
+
 func UpdateCurrent(c *gin.Context) {
-	var req model.User
+	var req UpdateCurrentReq
 	if err := c.ShouldBind(&req); err != nil {
 		common.ErrorResp(c, err, 400)
 		return
 	}
 	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if user.IsGuest() {
+	if !user.IsAdmin() || user.Disabled {
 		common.ErrorStrResp(c, model.GuestCannotUpdateProfile, 403)
 		return
 	}
@@ -117,11 +128,26 @@ func UpdateCurrent(c *gin.Context) {
 	if req.Password != "" {
 		user.SetPassword(req.Password)
 	}
-	if err := op.UpdateUser(user); err != nil {
+	if err := op.UpdateOwner(user); err != nil {
 		common.ErrorResp(c, err, 500)
 	} else {
 		common.SuccessResp(c)
 	}
+}
+
+func DelUserCache(c *gin.Context) {
+	username := c.Query("username")
+	if username == "" {
+		owner, err := op.GetOwner()
+		if err == nil {
+			username = owner.Username
+		}
+	}
+	if err := op.DelUserCache(username); err != nil {
+		common.ErrorResp(c, err, 500)
+		return
+	}
+	common.SuccessResp(c)
 }
 
 func Generate2FA(c *gin.Context) {

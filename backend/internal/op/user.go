@@ -6,7 +6,6 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/pkg/singleflight"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
-	"github.com/pkg/errors"
 )
 
 var userG singleflight.Group[*model.User]
@@ -22,6 +21,17 @@ func GetAdmin() (*model.User, error) {
 		adminUser = user
 	}
 	return adminUser, nil
+}
+
+// GetOwner returns the unique owner user (wraps GetAdmin for single-owner model)
+func GetOwner() (*model.User, error) {
+	return GetAdmin()
+}
+
+// UpdateOwner updates the owner user
+func UpdateOwner(u *model.User) error {
+	u.Role = model.ADMIN
+	return UpdateUser(u)
 }
 
 func GetGuest() (*model.User, error) {
@@ -79,9 +89,6 @@ func DeleteUserById(id uint) error {
 		return errs.DeleteAdminOrGuest
 	}
 	Cache.DeleteUser(old.Username)
-	if err := DeleteSharingsByCreatorId(id); err != nil {
-		return errors.WithMessage(err, "failed to delete user's sharings")
-	}
 	return db.DeleteUserById(id)
 }
 
@@ -112,6 +119,10 @@ func Cancel2FAById(id uint) error {
 		return err
 	}
 	return Cancel2FAByUser(user)
+}
+
+func DelAdminCache() {
+	adminUser = nil
 }
 
 func DelUserCache(username string) error {

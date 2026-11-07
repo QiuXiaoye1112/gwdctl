@@ -1,20 +1,20 @@
 package model
 
 const (
-	SINGLE = iota
-	SITE
-	STYLE
-	PREVIEW
-	GLOBAL
-	OFFLINE_DOWNLOAD
-	INDEX
-	SSO
-	LDAP
-	S3
-	FTP
-	TRAFFIC
-	MEDIA
-	TRANSCODE
+	SINGLE           = 0
+	SITE             = 1
+	STYLE            = 2
+	PREVIEW          = 3
+	GLOBAL           = 4
+	OFFLINE_DOWNLOAD = 5
+	INDEX            = 6
+	SSO              = 7
+	LDAP             = 8
+	S3               = 9
+	FTP              = 10
+	TRAFFIC          = 11
+	MEDIA            = 12
+	TRANSCODE        = 13
 )
 
 const (

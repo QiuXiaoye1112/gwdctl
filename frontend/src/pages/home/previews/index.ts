@@ -27,12 +27,18 @@ const isPrior = (p: Prior): boolean => {
   return p()
 }
 
+export interface PreviewProps {
+  images?: ArchiveObj[]
+  navigate?: (name: string) => void
+  openWith?: boolean
+}
+
 export interface Preview {
   key: string
   type?: ObjType
   exts?: Ext
   provider?: RegExp
-  component: Component
+  component: Component<PreviewProps>
   prior: Prior
   availableInArchive?: boolean
 }
@@ -40,7 +46,7 @@ export interface Preview {
 export interface PreviewComponent {
   key: string
   name: string
-  component: Component
+  component: Component<PreviewProps>
 }
 
 const previews: Preview[] = [

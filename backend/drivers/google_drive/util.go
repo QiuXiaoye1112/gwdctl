@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
+	"net/url"
 	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/stream"
-	"github.com/avast/retry-go"
 
 	"github.com/OpenListTeam/OpenList/v4/drivers/base"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
@@ -71,15 +70,18 @@ func (d *GoogleDrive) request(url string, method string, callback base.ReqCallba
 	if err != nil {
 		return nil, err
 	}
-	if e.Error.Code != 0 {
-		if e.Error.Code == 401 {
-			err = d.refreshToken()
-			if err != nil {
-				return nil, err
-			}
-			return d.request(url, method, callback, resp)
+	if res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401 {
+		err = d.refreshToken()
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+		return d.request(url, method, callback, resp)
+	}
+	if res.StatusCode() < 200 || res.StatusCode() >= 300 {
+		if e.Error.Code != 0 {
+			return nil, fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+		}
+		return nil, fmt.Errorf("request failed with HTTP %d: %s", res.StatusCode(), res.String())
 	}
 	return res.Body(), nil
 }
@@ -188,65 +190,290 @@ func (d *GoogleDrive) batchGetTargetFilesInfo(targetIds []string) map[string]Fil
 	return result
 }
 
-func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, url string, up driver.UpdateProgress) error {
-	defaultChunkSize := d.ChunkSize * 1024 * 1024
+func cleanUploadUrl(rawUrl string) string {
+	u, err := url.Parse(rawUrl)
+	if err != nil {
+		return rawUrl
+	}
+	q := u.Query()
+	if q.Get("supportsAllDrives") == "" {
+		q.Set("supportsAllDrives", "true")
+	}
+	if q.Get("includeItemsFromAllDrives") == "" {
+		q.Set("includeItemsFromAllDrives", "true")
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// waitForCompletion handles the final completion state when all bytes have been transmitted to
+// the server but Google Drive returned HTTP 308 instead of 200/201.
+// In accordance with Google Drive resumable upload specifications, it only sends empty status queries
+// (Content-Range: bytes */totalSize), does not resend data, accumulates query attempts, applies
+// progressive backoff, and respects context cancellation.
+func (d *GoogleDrive) waitForCompletion(ctx context.Context, uploadUrl string, totalSize int64, up driver.UpdateProgress) error {
+	const maxAttempts = 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if utils.IsCanceled(ctx) {
+			return ctx.Err()
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadUrl, http.NoBody)
+		if err != nil {
+			return err
+		}
+		req.ContentLength = 0
+		req.Header.Set("Authorization", "Bearer "+d.AccessToken)
+		req.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", totalSize))
+
+		res, err := base.HttpClient.Do(req)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+				continue
+			}
+		}
+
+		status := res.StatusCode
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+
+		switch status {
+		case http.StatusOK, http.StatusCreated:
+			if up != nil {
+				up(100)
+			}
+			return nil
+		case 308:
+			// Server acknowledged bytes but has not finalized the file.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+				continue
+			}
+		case http.StatusUnauthorized:
+			if refErr := d.refreshToken(); refErr != nil {
+				return refErr
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+				continue
+			}
+		default:
+			return fmt.Errorf("status query failed with HTTP %d", status)
+		}
+	}
+	return fmt.Errorf("upload stalled: all %d bytes sent to server, but final HTTP 200/201 completion not confirmed after %d attempts", totalSize, maxAttempts)
+}
+
+func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, rawUrl string, up driver.UpdateProgress) error {
+	defaultChunkSize := int64(d.ChunkSize) * 1024 * 1024
+	if defaultChunkSize <= 0 {
+		defaultChunkSize = 10 * 1024 * 1024
+	}
+
+	uploadUrl := cleanUploadUrl(rawUrl)
+	var offset int64 = 0
+	totalSize := file.GetSize()
+	completed := false
+
+	// Handle empty file upload (0 bytes)
+	if totalSize == 0 {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadUrl, http.NoBody)
+		if err != nil {
+			return err
+		}
+		req.ContentLength = 0
+		req.Header.Set("Authorization", "Bearer "+d.AccessToken)
+		req.Header.Set("Content-Range", "bytes */0")
+
+		res, err := base.HttpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		status := res.StatusCode
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+
+		switch status {
+		case http.StatusOK, http.StatusCreated:
+			if up != nil {
+				up(100)
+			}
+			return nil
+		case 308:
+			return d.waitForCompletion(ctx, uploadUrl, 0, up)
+		default:
+			return fmt.Errorf("empty file upload failed with HTTP %d", status)
+		}
+	}
+
 	ss, err := stream.NewStreamSectionReader(file, int(defaultChunkSize), &up)
 	if err != nil {
 		return err
 	}
 
-	var offset int64 = 0
-	url += "?includeItemsFromAllDrives=true&supportsAllDrives=true"
-	for offset < file.GetSize() {
+	for offset < totalSize && !completed {
 		if utils.IsCanceled(ctx) {
 			return ctx.Err()
 		}
-		chunkSize := min(file.GetSize()-offset, defaultChunkSize)
-		reader, err := ss.GetSectionReader(offset, chunkSize)
+
+		chunkSize := min(totalSize-offset, defaultChunkSize)
+		chunkStart := offset
+		chunkEnd := offset + chunkSize
+
+		reader, err := ss.GetSectionReader(chunkStart, chunkSize)
 		if err != nil {
 			return err
 		}
-		limitedReader := driver.NewLimitedUploadStream(ctx, reader)
-		err = retry.Do(func() error {
-			reader.Seek(0, io.SeekStart)
-			req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, limitedReader)
+
+		curOffset := chunkStart
+		noProgressCount := 0
+
+		// Upload bytes within this chunk until the entire chunk is confirmed or upload finishes
+		for curOffset < chunkEnd && !completed {
+			if utils.IsCanceled(ctx) {
+				ss.FreeSectionReader(reader)
+				return ctx.Err()
+			}
+
+			// Seek within reader to current unconfirmed offset
+			relOffset := curOffset - chunkStart
+			if _, err := reader.Seek(relOffset, io.SeekStart); err != nil {
+				ss.FreeSectionReader(reader)
+				return fmt.Errorf("seek reader failed: %w", err)
+			}
+
+			sendLen := chunkEnd - curOffset
+			limitedReader := driver.NewLimitedUploadStream(ctx, io.LimitReader(reader, sendLen))
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadUrl, limitedReader)
 			if err != nil {
+				ss.FreeSectionReader(reader)
 				return err
 			}
-			req.Header = map[string][]string{
-				"Authorization":  {"Bearer " + d.AccessToken},
-				"Content-Length": {strconv.FormatInt(chunkSize, 10)},
-				"Content-Range":  {fmt.Sprintf("bytes %d-%d/%d", offset, offset+chunkSize-1, file.GetSize())},
-			}
+			req.ContentLength = sendLen
+			req.Header.Set("Authorization", "Bearer "+d.AccessToken)
+			req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", curOffset, chunkEnd-1, totalSize))
+
 			res, err := base.HttpClient.Do(req)
 			if err != nil {
-				return err
+				noProgressCount++
+				if noProgressCount >= 5 {
+					ss.FreeSectionReader(reader)
+					return fmt.Errorf("upload chunk network error: %w", err)
+				}
+				time.Sleep(time.Duration(noProgressCount) * 100 * time.Millisecond)
+				continue
 			}
-			defer res.Body.Close()
-			bytes, _ := io.ReadAll(res.Body)
-			var e Error
-			utils.Json.Unmarshal(bytes, &e)
-			if e.Error.Code != 0 {
-				if e.Error.Code == 401 {
-					err = d.refreshToken()
-					if err != nil {
-						return err
+
+			bytes, readErr := io.ReadAll(res.Body)
+			res.Body.Close()
+			if readErr != nil {
+				ss.FreeSectionReader(reader)
+				return fmt.Errorf("read response body failed: %w", readErr)
+			}
+
+			switch res.StatusCode {
+			case http.StatusOK, http.StatusCreated:
+				// Final completion!
+				completed = true
+				curOffset = chunkEnd
+				offset = totalSize
+				if up != nil {
+					up(100)
+				}
+
+			case 308: // Resume Incomplete
+				rangeHeader := res.Header.Get("Range")
+				var confirmed int64 = -1
+				if rangeHeader != "" {
+					var start, end int64
+					if n, _ := fmt.Sscanf(rangeHeader, "bytes=%d-%d", &start, &end); n == 2 {
+						confirmed = end + 1
 					}
 				}
-				return fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+
+				if confirmed <= curOffset {
+					// Server returned 308 without Range, or Range did not advance beyond curOffset.
+					// Strictly no progress made. Do NOT guess!
+					noProgressCount++
+					if noProgressCount >= 5 {
+						ss.FreeSectionReader(reader)
+						return fmt.Errorf("upload stalled: server returned HTTP 308 without progress (Range: %q, current: %d)", rangeHeader, curOffset)
+					}
+					select {
+					case <-ctx.Done():
+						ss.FreeSectionReader(reader)
+						return ctx.Err()
+					case <-time.After(time.Duration(noProgressCount) * 100 * time.Millisecond):
+					}
+				} else {
+					// Forward progress made
+					noProgressCount = 0
+					if confirmed >= totalSize {
+						// All bytes uploaded to server, but server responded with 308 instead of 200/201.
+						// Transition to dedicated completion query loop without resending data.
+						ss.FreeSectionReader(reader)
+						return d.waitForCompletion(ctx, uploadUrl, totalSize, up)
+					} else if confirmed >= chunkEnd {
+						// Entire chunk confirmed!
+						curOffset = confirmed
+						offset = confirmed
+						if up != nil {
+							up(float64(confirmed) / float64(totalSize) * 100)
+						}
+					} else {
+						// Partial confirmation within chunk
+						curOffset = confirmed
+						if up != nil {
+							up(float64(confirmed) / float64(totalSize) * 100)
+						}
+					}
+				}
+
+			case http.StatusUnauthorized:
+				if refErr := d.refreshToken(); refErr != nil {
+					ss.FreeSectionReader(reader)
+					return refErr
+				}
+				noProgressCount++
+				if noProgressCount >= 5 {
+					ss.FreeSectionReader(reader)
+					return fmt.Errorf("token refresh retry exceeded")
+				}
+
+			default:
+				var e Error
+				if jsonErr := utils.Json.Unmarshal(bytes, &e); jsonErr == nil && e.Error.Code != 0 {
+					if e.Error.Code == 401 {
+						if refErr := d.refreshToken(); refErr != nil {
+							ss.FreeSectionReader(reader)
+							return refErr
+						}
+						noProgressCount++
+						if noProgressCount < 5 {
+							continue
+						}
+					}
+					ss.FreeSectionReader(reader)
+					return fmt.Errorf("upload chunk failed (HTTP %d): %s (%v)", res.StatusCode, e.Error.Message, e.Error.Errors)
+				}
+				ss.FreeSectionReader(reader)
+				return fmt.Errorf("upload chunk failed with HTTP %d: %s", res.StatusCode, string(bytes))
 			}
-			up(float64(offset+chunkSize) / float64(file.GetSize()) * 100)
-			return nil
-		},
-			retry.Context(ctx),
-			retry.Attempts(3),
-			retry.DelayType(retry.BackOffDelay),
-			retry.Delay(time.Second))
-		ss.FreeSectionReader(reader)
-		if err != nil {
-			return err
 		}
-		offset += chunkSize
+
+		ss.FreeSectionReader(reader)
+	}
+
+	if !completed {
+		return fmt.Errorf("upload incomplete: final 200/201 response was not received")
 	}
 	return nil
 }

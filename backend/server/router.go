@@ -65,16 +65,16 @@ func Init(e *gin.Engine) {
 	g.HEAD("/sad/:sid/*path", middlewares.PathParse, middlewares.SharingIdParse, handles.SharingArchiveExtract)
 
 	api := g.Group("/api")
-	auth := api.Group("", middlewares.Auth(false))
+	ownerAuth := api.Group("", middlewares.RequireOwner)
 
 	api.POST("/auth/login", handles.Login)
 	api.POST("/auth/login/hash", handles.LoginHash)
-	auth.GET("/me", handles.CurrentUser)
-	auth.POST("/me/update", handles.UpdateCurrent)
-	auth.POST("/auth/2fa/generate", handles.Generate2FA)
-	auth.POST("/auth/2fa/verify", handles.Verify2FA)
-	auth.POST("/auth/2fa/cancel", handles.Cancel2FA)
-	auth.GET("/auth/logout", handles.LogOut)
+	ownerAuth.GET("/me", handles.CurrentUser)
+	ownerAuth.POST("/me/update", handles.UpdateCurrent)
+	ownerAuth.POST("/auth/2fa/generate", handles.Generate2FA)
+	ownerAuth.POST("/auth/2fa/verify", handles.Verify2FA)
+	ownerAuth.POST("/auth/2fa/cancel", handles.Cancel2FA)
+	ownerAuth.GET("/auth/logout", handles.LogOut)
 
 	public := api.Group("/public")
 	public.Any("/settings", handles.PublicSettings)
@@ -82,11 +82,11 @@ func Init(e *gin.Engine) {
 	public.Any("/init_status", handles.InitStatus)
 	public.POST("/init/setup", handles.InitSetup)
 
-	_fs(auth.Group("/fs"))
+	_fs(ownerAuth.Group("/fs"))
 	fsAndShare(api.Group("/fs", middlewares.Auth(true)))
-	_task(auth.Group("/task", middlewares.AuthNotGuest))
-	_sharing(auth.Group("/share", middlewares.AuthNotGuest))
-	admin(auth.Group("/admin", middlewares.AuthAdmin))
+	_task(ownerAuth.Group("/task"))
+	_sharing(ownerAuth.Group("/share"))
+	admin(ownerAuth.Group("/admin"))
 	if flags.Debug || flags.Dev {
 		debug(g.Group("/debug"))
 	}
@@ -103,6 +103,9 @@ func admin(g *gin.RouterGroup) {
 	setting.POST("/delete", handles.DeleteSetting)
 	setting.POST("/default", handles.DefaultSettings)
 	setting.POST("/reset_token", handles.ResetToken)
+
+	user := g.Group("/user")
+	user.POST("/del_cache", handles.DelUserCache)
 
 	_task(g.Group("/task"))
 
