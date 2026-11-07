@@ -14,7 +14,6 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/stream"
 	"github.com/OpenListTeam/OpenList/v4/internal/task"
 	"github.com/OpenListTeam/OpenList/v4/internal/task_group"
-	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 	"github.com/OpenListTeam/tache"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -183,35 +182,8 @@ func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, ds
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed get dst storage")
 	}
+	sameStorage := srcStorage.GetStorage() == dstStorage.GetStorage()
 
-	if srcStorage.GetStorage() == dstStorage.GetStorage() {
-		if utils.IsBool(skipHook...) {
-			ctx = context.WithValue(ctx, conf.SkipHookKey, struct{}{})
-		}
-		if taskType == copy || taskType == merge {
-			if dstName != "" {
-				if supportsNamedNativeCopy(srcStorage) {
-					err = copyNamedInStorage(ctx, srcStorage, srcObjActualPath, dstDirActualPath, dstName)
-					if !errors.Is(err, errs.NotImplement) && !errors.Is(err, errs.NotSupport) {
-						return nil, err
-					}
-				}
-			} else {
-				err = op.Copy(ctx, srcStorage, srcObjActualPath, dstDirActualPath)
-				if !errors.Is(err, errs.NotImplement) && !errors.Is(err, errs.NotSupport) {
-					return nil, err
-				}
-			}
-		} else {
-			err = op.Move(ctx, srcStorage, srcObjActualPath, dstDirActualPath)
-			if !errors.Is(err, errs.NotImplement) && !errors.Is(err, errs.NotSupport) {
-				return nil, err
-			}
-		}
-	}
-
-	// Use the transfer path when native copy cannot preserve the destination
-	// name or the source and destination storages differ.
 	t := &FileTransferTask{
 		TaskData: TaskData{
 			SrcStorage:    srcStorage,
@@ -243,7 +215,7 @@ func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, ds
 		if err == nil {
 			hasSuccess = true
 		}
-		if taskType == move {
+		if taskType == move && !sameStorage {
 			task_group.TransferCoordinator.AppendPayload(t.groupID, task_group.SrcPathToRemove(srcObjPath))
 		}
 		task_group.TransferCoordinator.Done(context.WithoutCancel(ctx), t.groupID, hasSuccess)
@@ -255,13 +227,26 @@ func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, ds
 	if taskType == copy || taskType == merge {
 		CopyTaskManager.Add(t)
 	} else {
-		task_group.TransferCoordinator.AppendPayload(t.groupID, task_group.SrcPathToRemove(srcObjPath))
+		if !sameStorage {
+			task_group.TransferCoordinator.AppendPayload(t.groupID, task_group.SrcPathToRemove(srcObjPath))
+		}
 		MoveTaskManager.Add(t)
 	}
 	return t, nil
 }
 
 func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransferTask) error) error {
+	if t.SrcStorage.GetStorage() == t.DstStorage.GetStorage() && t.TaskType == move {
+		t.Status = "moving in storage"
+		err := op.Move(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath)
+		if !errors.Is(err, errs.NotImplement) && !errors.Is(err, errs.NotSupport) {
+			if err == nil {
+				t.SetProgress(100)
+			}
+			return err
+		}
+	}
+
 	t.Status = "getting src object"
 	srcObj, err := op.Get(t.Ctx(), t.SrcStorage, t.SrcActualPath)
 	if err != nil {
@@ -332,6 +317,24 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 		}
 		t.Status = fmt.Sprintf("src object is dir, added all %s tasks of objs", t.TaskType)
 		return nil
+	}
+
+	if t.SrcStorage.GetStorage() == t.DstStorage.GetStorage() && (t.TaskType == copy || t.TaskType == merge) {
+		t.Status = "copying in storage"
+		var copyErr error
+		if t.DstName != "" && supportsNamedNativeCopy(t.SrcStorage) {
+			copyErr = copyNamedInStorage(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath, t.DstName)
+		} else if t.DstName == "" {
+			copyErr = op.Copy(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath)
+		} else {
+			copyErr = errs.NotSupport
+		}
+		if !errors.Is(copyErr, errs.NotImplement) && !errors.Is(copyErr, errs.NotSupport) {
+			if copyErr == nil {
+				t.SetProgress(100)
+			}
+			return copyErr
+		}
 	}
 
 	t.Status = "getting src object link"

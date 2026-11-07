@@ -35,7 +35,7 @@ func list(ctx context.Context, storage driver.Driver, path string, args model.Li
 	path = utils.FixAndCleanPath(path)
 	log.Debugf("op.List %s", path)
 	key := Key(storage, path)
-	if !args.Refresh {
+	if !args.Refresh && storage.GetStorage().CacheExpiration > 0 {
 		if dirCache, exists := Cache.dirCache.Get(key); exists {
 			log.Debugf("use cache when list %s", path)
 			objs := dirCache.GetSortedObjects(storage)
@@ -110,6 +110,9 @@ func list(ctx context.Context, storage driver.Driver, path string, args model.Li
 				}
 
 				duration := time.Minute * time.Duration(ttl)
+				if duration <= 0 {
+					duration = 3 * time.Second
+				}
 				Cache.dirCache.SetWithTTL(key, newDirectoryCache(files), duration)
 			} else {
 				log.Debugf("del cache: %s", key)

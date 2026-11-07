@@ -98,10 +98,13 @@ export const RecursiveMove = () => {
           </HStack>
         }
         onSubmit={async (dst) => {
-          const resp = await ok(pathname(), dst, conflictPolicy())
+          const src = pathname()
+          const cp = conflictPolicy()
+          onClose()
+          const resp = await ok(src, dst, cp)
+          bus.emit("tool", "tasks_refresh")
           handleRespWithNotifySuccess(resp, () => {
             refresh()
-            onClose()
           })
         }}
       />

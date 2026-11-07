@@ -55,14 +55,12 @@ export const Delete = () => {
             colorScheme="danger"
             loading={loading()}
             onClick={async () => {
-              const resp = await ok(
-                pathname(),
-                selectedObjs().map((obj) => obj.name),
-                false,
-              )
+              const dir = pathname()
+              const names = selectedObjs().map((obj) => obj.name)
+              onClose()
+              const resp = await ok(dir, names, false)
               handleRespWithNotifySuccess(resp, () => {
                 refresh()
-                onClose()
               })
             }}
           >

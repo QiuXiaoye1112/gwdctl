@@ -20,13 +20,19 @@ import {
   RiDocumentFolderUploadFill,
   RiDocumentFileUploadFill,
 } from "solid-icons/ri"
-import { getFileSize, notify, pathJoin } from "~/utils"
+import { bus, getFileSize, notify, pathJoin } from "~/utils"
 import { asyncPool } from "~/utils/async_pool"
 import { createStore } from "solid-js/store"
 import { UploadFileProps, StatusBadge } from "./types"
 import { File2Upload, traverseFileTree } from "./util"
 import { SelectWrapper } from "~/components"
 import { getUploads } from "./uploads"
+
+export const [uploadFiles, setUploadFiles] = createStore<{
+  uploads: UploadFileProps[]
+}>({
+  uploads: [],
+})
 
 const UploadFile = (props: UploadFileProps & { onRetry?: () => void }) => {
   const t = useT()
@@ -90,11 +96,6 @@ const Upload = () => {
   const { refresh } = usePath()
   const [drag, setDrag] = createSignal(false)
   const [uploading, setUploading] = createSignal(false)
-  const [uploadFiles, setUploadFiles] = createStore<{
-    uploads: UploadFileProps[]
-  }>({
-    uploads: [],
-  })
   const allDone = () => {
     return uploadFiles.uploads.every(({ status }) =>
       ["success", "error"].includes(status),
@@ -103,19 +104,6 @@ const Upload = () => {
   let fileInput!: HTMLInputElement
   let folderInput!: HTMLInputElement
   const fileMap = new Map<string, File>()
-  const handleAddFiles = async (files: File[]) => {
-    if (files.length === 0) return
-    setUploading(true)
-    for (const file of files) {
-      const upload = File2Upload(file)
-      fileMap.set(upload.path, file)
-      setUploadFiles("uploads", (uploads) => [...uploads, upload])
-    }
-    for await (const ms of asyncPool(3, files, handleFile)) {
-      console.log(ms)
-    }
-    refresh()
-  }
   const setUpload = (path: string, key: keyof UploadFileProps, value: any) => {
     setUploadFiles("uploads", (upload) => upload.path === path, key, value)
   }
@@ -123,43 +111,88 @@ const Upload = () => {
   const uploaders = getUploads()
   const [curUploader, setCurUploader] = createSignal(uploaders[0])
   const asTaskUnsupported = () => curUploader()?.name === "Multipart"
-  const retryFile = (path: string) => {
-    const file = fileMap.get(path)
-    if (!file) return
-    setUpload(path, "msg", "")
-    setUpload(path, "progress", 0)
-    setUpload(path, "speed", 0)
-    handleFile(file)
-  }
-  const handleFile = async (file: File) => {
+
+  const runFileUpload = async (
+    file: File,
+    baseDir: string,
+    uploader: ReturnType<typeof getUploads>[0],
+    asTask: boolean,
+    overwrite: boolean,
+  ) => {
     const path = file.webkitRelativePath ? file.webkitRelativePath : file.name
     setUpload(path, "status", "uploading")
-    const uploadPath = pathJoin(pathname(), path)
+    const uploadPath = pathJoin(baseDir, path)
     try {
-      const err = await curUploader()
+      const err = await uploader
         .upload(
           uploadPath,
           file,
           (key, value) => {
             setUpload(path, key, value)
           },
-          asTaskUnsupported() ? false : uploadConfig.asTask,
-          uploadConfig.overwrite,
+          asTask,
+          overwrite,
           false,
         )
         .catch((err) => err)
       if (!err) {
         setUpload(path, "status", "success")
         setUpload(path, "progress", 100)
+        refresh(false, true)
       } else {
         setUpload(path, "status", "error")
         setUpload(path, "msg", err.message)
+        notify.error(`${path}: ${err.message}`)
       }
     } catch (e: any) {
       console.error(e)
       setUpload(path, "status", "error")
       setUpload(path, "msg", e.message)
+      notify.error(`${path}: ${e.message}`)
     }
+  }
+
+  const handleAddFiles = async (files: File[]) => {
+    if (files.length === 0) return
+    const baseDir = pathname()
+    const uploader = curUploader()
+    const asTask = asTaskUnsupported() ? false : uploadConfig.asTask
+    const overwrite = uploadConfig.overwrite
+    for (const file of files) {
+      const upload = File2Upload(file)
+      fileMap.set(upload.path, file)
+      setUploadFiles("uploads", (uploads) => [
+        ...uploads.filter((u) => u.path !== upload.path),
+        upload,
+      ])
+    }
+    bus.emit("tool", "close_upload")
+    bus.emit("tool", "tasks_refresh")
+    for await (const _ of asyncPool(3, files, (f) =>
+      runFileUpload(f, baseDir, uploader, asTask, overwrite),
+    )) {
+      // background upload pool
+    }
+    setUploadFiles("uploads", (uploads) =>
+      uploads.filter(({ status }) => !["success", "error"].includes(status)),
+    )
+    bus.emit("tool", "tasks_refresh")
+    refresh(false, true)
+  }
+
+  const retryFile = (path: string) => {
+    const file = fileMap.get(path)
+    if (!file) return
+    setUpload(path, "msg", "")
+    setUpload(path, "progress", 0)
+    setUpload(path, "speed", 0)
+    runFileUpload(
+      file,
+      pathname(),
+      curUploader(),
+      asTaskUnsupported() ? false : uploadConfig.asTask,
+      uploadConfig.overwrite,
+    )
   }
   return (
     <VStack w="$full" pb="$2" spacing="$2">

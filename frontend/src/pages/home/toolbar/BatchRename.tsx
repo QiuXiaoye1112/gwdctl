@@ -427,19 +427,21 @@ export const BatchRename = () => {
             <Button
               loading={loading()}
               onClick={async () => {
-                const resp = await ok(pathname(), matchNames())
+                const dir = pathname()
+                const items = [...matchNames()]
+                setMatchNames([])
+                setSrcName("")
+                setNewName("")
+                setPaddingZeros("")
+                setType("1")
+                setNewNameType("string")
+                setValidationErrorSrc("")
+                setValidationErrorNew("")
+                closePreviewModal()
+                onClose()
+                const resp = await ok(dir, items)
                 handleRespWithNotifySuccess(resp, () => {
-                  setMatchNames([])
-                  setSrcName("")
-                  setNewName("")
-                  setPaddingZeros("")
-                  setType("1")
-                  setNewNameType("string")
-                  setValidationErrorSrc("")
-                  setValidationErrorNew("")
                   refresh()
-                  onClose()
-                  closePreviewModal()
                 })
               }}
               disabled={matchNames().length == 0}

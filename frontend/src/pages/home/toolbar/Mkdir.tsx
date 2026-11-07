@@ -26,10 +26,11 @@ export const Mkdir = () => {
       onClose={onClose}
       loading={loading()}
       onSubmit={async (name) => {
-        const resp = await ok(pathJoin(pathname(), name))
+        const p = pathJoin(pathname(), name)
+        onClose()
+        const resp = await ok(p)
         handleRespWithNotifySuccess(resp, () => {
           refresh()
-          onClose()
         })
       }}
     />

@@ -41,14 +41,13 @@ export const NewFile = () => {
       onClose={onClose}
       loading={loading()}
       onSubmit={async (name) => {
-        const resp = await ok(
-          pathJoin(pathname(), name),
-          password(),
-          overwrite(),
-        )
+        const p = pathJoin(pathname(), name)
+        const pw = password()
+        const ov = overwrite()
+        onClose()
+        const resp = await ok(p, pw, ov)
         handleRespWithNotifySuccess(resp, () => {
           refresh()
-          onClose()
         })
       }}
     />

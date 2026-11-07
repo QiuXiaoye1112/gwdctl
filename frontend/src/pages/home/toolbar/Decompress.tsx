@@ -84,19 +84,18 @@ export const Decompress = () => {
         </VStack>
       }
       onSubmit={async (dst) => {
-        const resp = await ok(
-          srcPath(),
-          dst,
-          srcName(),
-          archivePass(),
-          innerPath(),
-          cacheFull(),
-          putIntoNewDir(),
-          overwrite(),
-        )
+        const sp = srcPath()
+        const sn = srcName()
+        const ap = archivePass()
+        const ip = innerPath()
+        const cf = cacheFull()
+        const pnd = putIntoNewDir()
+        const ov = overwrite()
+        onClose()
+        const resp = await ok(sp, dst, sn, ap, ip, cf, pnd, ov)
+        bus.emit("tool", "tasks_refresh")
         handleRespWithNotifySuccess(resp, () => {
           refresh()
-          onClose()
         })
       }}
     >

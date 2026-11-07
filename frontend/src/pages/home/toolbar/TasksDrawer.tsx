@@ -22,15 +22,16 @@ import {
   Tooltip,
   VStack,
 } from "@hope-ui/solid"
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { OcWorkflow2 } from "solid-icons/oc"
 import { RiSystemRefreshLine } from "solid-icons/ri"
 import { IoClose } from "solid-icons/io"
-import { useT, useRouter } from "~/hooks"
-import { bus, notify, r } from "~/utils"
+import { useT, useRouter, usePath } from "~/hooks"
+import { bus, getFileSize, notify, r } from "~/utils"
 import { TaskInfo } from "~/types"
 import { me } from "~/store"
 import { UserMethods } from "~/types"
+import { uploadFiles } from "../uploads/Upload"
 
 export const [runningTaskCount, setRunningTaskCount] = createSignal(0)
 
@@ -70,14 +71,26 @@ function formatTaskName(name: string): string {
 export const TasksDrawer = () => {
   const t = useT()
   const { to } = useRouter()
+  const { refresh } = usePath()
   const { isOpen, onOpen, onClose } = createDisclosure()
   const [tasks, setTasks] = createSignal<RunningTaskItem[]>([])
   const [loading, setLoading] = createSignal(false)
   const [cancelingId, setCancelingId] = createSignal<string>("")
+  let prevBackendCount = 0
+
+  const activeUploads = () =>
+    uploadFiles.uploads.filter(
+      (u) => !["success", "error"].includes(u.status),
+    )
+
+  const totalRunningCount = () => activeUploads().length + tasks().length
+
+  createEffect(() => {
+    setRunningTaskCount(totalRunningCount())
+  })
 
   const fetchRunningTasks = async (showLoading = false) => {
     if (UserMethods.is_guest(me())) {
-      setRunningTaskCount(0)
       setTasks([])
       return
     }
@@ -103,8 +116,11 @@ export const TasksDrawer = () => {
         })
       )
       const allRunning = results.flat()
+      if (prevBackendCount > 0 && allRunning.length < prevBackendCount) {
+        refresh(false, true)
+      }
+      prevBackendCount = allRunning.length
       setTasks(allRunning)
-      setRunningTaskCount(allRunning.length)
     } finally {
       if (showLoading) setLoading(false)
     }
@@ -131,6 +147,8 @@ export const TasksDrawer = () => {
     if (name === "tasks") {
       onOpen()
       fetchRunningTasks(true)
+    } else if (name === "tasks_refresh") {
+      fetchRunningTasks(false)
     }
   }
   bus.on("tool", handler)
@@ -144,7 +162,7 @@ export const TasksDrawer = () => {
     fetchRunningTasks()
     timer = setInterval(() => {
       fetchRunningTasks(false)
-    }, 4000)
+    }, 1500)
   })
   onCleanup(() => {
     if (timer) clearInterval(timer)
@@ -161,7 +179,7 @@ export const TasksDrawer = () => {
               {t("tasks.undone") || "运行中的任务"}
             </Text>
             <Badge colorScheme="info" rounded="$full">
-              {tasks().length}
+              {totalRunningCount()}
             </Badge>
             <Spacer />
             <HStack spacing="$1" alignItems="center">
@@ -191,7 +209,7 @@ export const TasksDrawer = () => {
         </DrawerHeader>
         <DrawerBody>
           <Show
-            when={!loading() || tasks().length > 0}
+            when={!loading() || totalRunningCount() > 0}
             fallback={
               <Center h="$48">
                 <Spinner size="lg" color="$info9" />
@@ -199,7 +217,7 @@ export const TasksDrawer = () => {
             }
           >
             <Show
-              when={tasks().length > 0}
+              when={totalRunningCount() > 0}
               fallback={
                 <Center h="$64" flexDirection="column">
                   <Icon as={OcWorkflow2} boxSize="$12" color="$neutral7" mb="$3" />
@@ -212,6 +230,60 @@ export const TasksDrawer = () => {
               }
             >
               <VStack spacing="$3" alignItems="stretch">
+                <For each={activeUploads()}>
+                  {(up) => (
+                    <Box
+                      p="$3"
+                      rounded="$md"
+                      border="1px solid"
+                      borderColor="$neutral5"
+                      bgColor="$neutral2"
+                      _hover={{ borderColor: "$info7" }}
+                      transition="border-color 0.2s"
+                    >
+                      <HStack justifyContent="space-between" mb="$2">
+                        <HStack spacing="$2" overflow="hidden" maxW="70%">
+                          <Badge colorScheme="info" flexShrink={0}>
+                            {localStorage.getItem("lang") === "en" ? "Upload" : "上传"}
+                          </Badge>
+                          <Text
+                            fontWeight="$semibold"
+                            fontSize="$sm"
+                            noOfLines={1}
+                            title={up.path}
+                          >
+                            {up.path}
+                          </Text>
+                        </HStack>
+                        <Badge colorScheme="success" flexShrink={0}>
+                          {getFileSize(up.speed)}/s
+                        </Badge>
+                      </HStack>
+                      <HStack spacing="$2">
+                        <Progress
+                          value={up.progress}
+                          w="$full"
+                          size="sm"
+                          rounded="$full"
+                        >
+                          <ProgressIndicator
+                            color={up.progress >= 100 ? "$success9" : "$info9"}
+                            rounded="$full"
+                          />
+                        </Progress>
+                        <Text
+                          fontSize="$xs"
+                          fontWeight="$medium"
+                          color="$neutral11"
+                          minW="40px"
+                          textAlign="right"
+                        >
+                          {up.progress.toFixed(0)}%
+                        </Text>
+                      </HStack>
+                    </Box>
+                  )}
+                </For>
                 <For each={tasks()}>
                   {(task) => (
                     <Box

@@ -91,18 +91,16 @@ export const Copy = () => {
         </VStack>
       }
       onSubmit={async (dst) => {
-        const resp = await ok(
-          pathname(),
-          dst,
-          selectedObjs().map((obj) => obj.name),
-          overwrite(),
-          skipExisting(),
-          merge(),
-          false,
-        )
+        const src = pathname()
+        const names = selectedObjs().map((obj) => obj.name)
+        const ov = overwrite()
+        const skip = skipExisting()
+        const mg = merge()
+        onClose()
+        const resp = await ok(src, dst, names, ov, skip, mg, false)
+        bus.emit("tool", "tasks_refresh")
         handleRespWithNotifySuccess(resp, () => {
           refresh()
-          onClose()
         })
       }}
     />
@@ -165,17 +163,15 @@ export const Move = () => {
         </VStack>
       }
       onSubmit={async (dst) => {
-        const resp = await ok(
-          pathname(),
-          dst,
-          selectedObjs().map((obj) => obj.name),
-          overwrite(),
-          skipExisting(),
-          false,
-        )
+        const src = pathname()
+        const names = selectedObjs().map((obj) => obj.name)
+        const ov = overwrite()
+        const skip = skipExisting()
+        onClose()
+        const resp = await ok(src, dst, names, ov, skip, false)
+        bus.emit("tool", "tasks_refresh")
         handleRespWithNotifySuccess(resp, () => {
           refresh()
-          onClose()
         })
       }}
     />

@@ -55,10 +55,11 @@ export const RemoveEmptyDirectory = () => {
             colorScheme="danger"
             loading={loading()}
             onClick={async () => {
-              const resp = await ok(pathname())
+              const dir = pathname()
+              onClose()
+              const resp = await ok(dir)
               handleRespWithNotifySuccess(resp, () => {
                 refresh()
-                onClose()
               })
             }}
           >

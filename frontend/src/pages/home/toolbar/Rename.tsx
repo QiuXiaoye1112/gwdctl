@@ -49,15 +49,12 @@ export const Rename = () => {
         defaultValue={selectedObjs()[0]?.name ?? ""}
         loading={loading()}
         onSubmit={async (name) => {
-          const resp = await ok(
-            pathJoin(pathname(), selectedObjs()[0].name),
-            name,
-            overwrite(),
-            false,
-          )
+          const srcPath = pathJoin(pathname(), selectedObjs()[0].name)
+          const ov = overwrite()
+          onClose()
+          const resp = await ok(srcPath, name, ov, false)
           handleRespWithNotifySuccess(resp, () => {
             refresh()
-            onClose()
           })
         }}
       />
