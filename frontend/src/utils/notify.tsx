@@ -21,10 +21,12 @@ const showCompact = (
         rounded="$lg"
         py="$1_5"
         px="$3"
-        mb="56px"
+        mb="64px"
+        mx="auto"
         fontSize="$sm"
         w="auto"
         maxW="85vw"
+        css={{ pointerEvents: "auto" }}
       >
         <AlertIcon boxSize="$4" mr="$2" />
         <AlertDescription mr="$1">{firstUpperCase(message)}</AlertDescription>
