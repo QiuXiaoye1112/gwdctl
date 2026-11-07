@@ -8,7 +8,7 @@ import { NewFile } from "./NewFile"
 import { Mkdir } from "./Mkdir"
 import { RecursiveMove } from "./RecursiveMove"
 import { RemoveEmptyDirectory } from "./RemoveEmptyDirectory"
-import { PackageDownloadModal } from "./Download"
+import { DirectDownloadModal, PackageDownloadModal } from "./Download"
 import { lazy } from "solid-js"
 import { ModalWrapper } from "./ModalWrapper"
 import { LocalSettings } from "./LocalSettings"
@@ -32,6 +32,7 @@ export const Modal = () => {
       <Share />
       <RecursiveMove />
       <RemoveEmptyDirectory />
+      <DirectDownloadModal />
       <PackageDownloadModal />
       <ModalWrapper name="upload" title="home.toolbar.upload">
         <Upload />

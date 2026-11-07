@@ -121,7 +121,7 @@ export const ContextMenu = () => {
               }
               bus.emit("tool", "package_download")
             } else {
-              downloadSelected()
+              bus.emit("tool", "direct_download")
             }
           }}
         >
@@ -141,7 +141,7 @@ export const ContextMenu = () => {
           !selectedObjs().some((o) => o.is_dir)
         }
       >
-        <Item onClick={downloadSelected}>
+        <Item onClick={() => bus.emit("tool", "direct_download")}>
           <ItemContent name="direct_download" />
         </Item>
         <Show when={canPackageDownload()}>
