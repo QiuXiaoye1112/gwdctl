@@ -3,6 +3,12 @@ import path from "path"
 
 const root = "./src/lang"
 const entry = "entry.ts"
+// Keep the bundled languages available in clean checkouts without Crowdin access.
+for (const locale of ["en", "zh-CN"]) {
+  if (!fs.existsSync(path.join(root, locale, "index.json"))) {
+    throw new Error(`Required bundled language is missing: ${locale}`)
+  }
+}
 const sourceDir = path.join(root, "en")
 const sourceFiles = fs
   .readdirSync(sourceDir)

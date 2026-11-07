@@ -10,6 +10,14 @@
 
 You can use [the build script](./build.sh).
 
+English and Simplified Chinese are included in this
+repository, so `pnpm build` works without Crowdin credentials. The build prepares
+the language entry files and fails if a bundled language is missing.
+
+The Chinese dictionary originates from the official
+[OpenList Frontend v4.2.9 language archive](https://github.com/OpenListTeam/OpenList-Frontend/releases/download/v4.2.9/i18n.tar.gz),
+with translations for this project's additional interface text.
+
 ```plaintext
 Usage: ./build.sh [--dev|--release] [--compress|--no-compress] [--enforce-tag] [--skip-i18n] [--lite]
 

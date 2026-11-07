@@ -3,14 +3,14 @@ import { createResource, createSignal } from "solid-js"
 export { i18n }
 
 // glob search by Vite
-const langs = import.meta.glob("~/lang/*/index.json", {
+const langs = import.meta.glob("~/lang/{en,zh-CN}/index.json", {
   eager: true,
   import: "lang",
 })
 
 // glob search for all entry.ts files
 const entryModules = import.meta.glob<{ dict: RawDictionary }>(
-  "~/lang/*/entry.ts",
+  "~/lang/{en,zh-CN}/entry.ts",
 )
 
 // all available languages
@@ -32,12 +32,7 @@ const defaultLang =
 // Get initial language from localStorage or fallback to defaultLang
 export let initialLang = localStorage.getItem("lang") ?? defaultLang
 
-// If user's browser is Chinese and stored lang was "en" (or missing), default to zh-CN
-if (userLang.startsWith("zh") && (initialLang === "en" || !initialLang)) {
-  initialLang = "zh-CN"
-  localStorage.setItem("lang", "zh-CN")
-}
-
+// Respect an explicitly saved language; use the browser default when unavailable.
 if (!languages.some((lang) => lang.code === initialLang)) {
   initialLang = defaultLang
 }
@@ -64,7 +59,13 @@ const fetchEnDict = async (): Promise<Dictionary> => {
 // Fetch and flatten the dictionary, with English fallback
 const fetchDictionary = async (locale: Lang): Promise<Dictionary> => {
   try {
-    const dict: RawDictionary = (await import(`~/lang/${locale}/entry.ts`)).dict
+    const load = Object.entries(entryModules).find(([path]) =>
+      path.endsWith(`/${locale}/entry.ts`),
+    )?.[1]
+    if (!load) {
+      throw new Error(`Unsupported language: ${locale}`)
+    }
+    const dict: RawDictionary = (await load()).dict
     const flatDict = i18n.flatten(dict)
 
     // If not English, merge with English as fallback (English keys underneath, locale on top)
