@@ -1,4 +1,4 @@
-import { bus, notify } from "~/utils"
+import { bus } from "~/utils"
 import { setMe, Me, getSetting, setSettings } from "~/store"
 import { uploadFiles } from "~/pages/home/uploads/Upload"
 
@@ -91,11 +91,6 @@ export const checkSessionTimeout = (onLogout: () => void) => {
   if (idle >= timeoutMinutes * 60 * 1000) {
     onLogout()
     setMe({} as Me)
-    notify.warning(
-      localStorage.getItem("lang") === "en"
-        ? `Session expired due to ${timeoutMinutes} minutes of inactivity. Please log in again.`
-        : `会话已超时（${timeoutMinutes}分钟无操作），请重新登录。`,
-    )
     bus.emit("to", `/@login?redirect=${encodeURIComponent(location.pathname)}`)
   }
 }
