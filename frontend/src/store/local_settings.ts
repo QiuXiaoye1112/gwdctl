@@ -45,26 +45,6 @@ export const initialLocalSettings = [
     type: "select",
     options: ["ellipsis", "scrollable", "multi_line"],
   },
-  {
-    key: "editor_font_size",
-    default: "14",
-    type: "number",
-    hidden: true,
-  },
-  {
-    key: "editor_word_wrap",
-    default: "false",
-    type: "select",
-    options: ["false", "true"],
-    hidden: true,
-  },
-  {
-    key: "editor_minimap",
-    default: "true",
-    type: "select",
-    options: ["false", "true"],
-    hidden: true,
-  },
 ]
 export type LocalSetting = (typeof initialLocalSettings)[number]
 if (local["global_default_layout"] === "image") {

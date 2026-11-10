@@ -255,12 +255,14 @@ export const fetchText = async (
       typeof rawContentType === "string" ? rawContentType : undefined
     return { content, contentType }
   } catch (e) {
-    return ts
-      ? await fetchText(url, false)
-      : {
-          content: `Failed to fetch ${url}: ${e}`,
-          contentType: "",
-        }
+    if (ts) return await fetchText(url, false)
+    const status = axios.isAxiosError(e) ? e.response?.status : undefined
+    return {
+      content: status
+        ? `无法预览文件：服务器返回 HTTP ${status}。`
+        : "无法预览文件，请检查网络后重试。",
+      contentType: "",
+    }
   }
 }
 

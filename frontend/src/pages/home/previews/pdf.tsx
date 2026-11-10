@@ -22,6 +22,22 @@ const PDFViewer = () => {
         type: "container",
         target: ref,
         src,
+        disabledCategories: [
+          "annotation",
+          "redaction",
+          "insert",
+          "form",
+          "history",
+          "panel-comment",
+        ],
+        permissions: {
+          overrides: {
+            modifyContents: false,
+            modifyAnnotations: false,
+            fillForms: false,
+            assembleDocument: false,
+          },
+        },
         theme: { preference: colorMode() },
         i18n: {
           defaultLocale: currentLang(),

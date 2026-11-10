@@ -38,7 +38,7 @@
       "flash": "Flash 播放器",
       "markdown_with_word_wrap": "Markdown 渲染器（带换行）",
       "url_open": "打开网址",
-      "text_editor": "文本编辑器",
+
       "image": "图像查看器",
       "video": "视频播放器",
       "audio": "音频播放器",
@@ -319,17 +319,6 @@
       "direct": "直接打开",
       "dblclick": "双击",
       "disable_while_checked": "选中时禁用"
-    },
-    "editor_font_size": "编辑器字体大小",
-    "editor_word_wrap": "编辑器自动换行",
-    "editor_word_wrap_options": {
-      "false": "关闭",
-      "true": "打开"
-    },
-    "editor_minimap": "编辑器小地图",
-    "editor_minimap_options": {
-      "false": "关闭",
-      "true": "打开"
     },
     "show_gallery_thumbnails": "显示图库缩略图",
     "show_gallery_thumbnails_options": {

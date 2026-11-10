@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -521,5 +523,40 @@ func TestAllBytesConfirmed308DoesNotLoopEndlessly(t *testing.T) {
 	// Total backoff is 100ms + 200ms + 300ms + 400ms + 500ms = 1500ms (~1.5s)
 	if elapsed < 1400*time.Millisecond || elapsed > 3*time.Second {
 		t.Fatalf("expected total backoff around 1.5s, got %v", elapsed)
+	}
+}
+
+type metadataTransport struct{ mime string }
+
+func (m metadataTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	body := fmt.Sprintf(`{"id":"doc-id","mimeType":%q}`, m.mime)
+	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+}
+
+func TestLinkExportsGoogleDocuments(t *testing.T) {
+	old := base.RestyClient
+	defer func() { base.RestyClient = old }()
+	for _, tc := range []struct{ mime, wantPath, wantQuery string }{
+		{"application/vnd.google-apps.document", "/drive/v3/files/doc-id/export", "text/markdown"},
+		{"application/pdf", "/drive/v3/files/doc-id", ""},
+	} {
+		t.Run(tc.mime, func(t *testing.T) {
+			base.RestyClient = resty.New().SetTransport(metadataTransport{mime: tc.mime})
+			d := &GoogleDrive{AccessToken: "test-token"}
+			link, err := d.Link(context.Background(), &model.Object{ID: "doc-id"}, model.LinkArgs{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, err := url.Parse(link.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if u.Path != tc.wantPath || u.Query().Get("mimeType") != tc.wantQuery {
+				t.Fatalf("unexpected link: %s", link.URL)
+			}
+			if tc.wantQuery == "" && u.Query().Get("alt") != "media" {
+				t.Fatalf("regular file missing media request: %s", link.URL)
+			}
+		})
 	}
 }

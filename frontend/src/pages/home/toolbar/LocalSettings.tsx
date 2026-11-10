@@ -30,7 +30,13 @@ import { For, Match, onCleanup, Switch } from "solid-js"
 import { FaSolidMinus, FaSolidPlus } from "solid-icons/fa"
 import { SwitchLanguageWhite, SwitchColorMode } from "~/components"
 import { useT } from "~/hooks"
-import { initialLocalSettings, local, LocalSetting, setLocal, clearLayoutRecord } from "~/store"
+import {
+  initialLocalSettings,
+  local,
+  LocalSetting,
+  setLocal,
+  clearLayoutRecord,
+} from "~/store"
 import { bus } from "~/utils"
 
 function LocalSettingEdit(props: LocalSetting) {
@@ -151,7 +157,7 @@ export const LocalSettings = () => {
         </DrawerHeader>
         <DrawerBody>
           <VStack spacing="$2">
-            <For each={initialLocalSettings.filter((s) => !s.hidden)}>
+            <For each={initialLocalSettings}>
               {(setting) => <LocalSettingEdit {...setting} />}
             </For>
           </VStack>

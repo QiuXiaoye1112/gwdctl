@@ -58,10 +58,6 @@ export default defineConfig({
       ? viteStaticCopy({
           targets: [
             {
-              src: "node_modules/monaco-editor/min/*",
-              dest: "static/monaco-editor",
-            },
-            {
               src: "node_modules/katex/dist/katex.min.css",
               dest: "static/katex",
             },

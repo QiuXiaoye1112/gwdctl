@@ -81,14 +81,6 @@ const previews: Preview[] = [
     prior: true,
   },
   {
-    key: "text_editor",
-    type: ObjType.TEXT,
-    exts: ["url"],
-    component: lazy(() => import("./text-editor")),
-    prior: true,
-    availableInArchive: false,
-  },
-  {
     key: "image",
     type: ObjType.IMAGE,
     exts: ["heic", "heif", "avif", "vvc", "avc"], // libheif
@@ -179,8 +171,10 @@ const previews: Preview[] = [
     },
     component: lazy(() => import("./archive")),
     prior: () => {
-      return getSettingBool("preview_archives_by_default") &&
+      return (
+        getSettingBool("preview_archives_by_default") &&
         !getSettingBool("preview_download_by_default")
+      )
     },
     availableInArchive: false,
   },
@@ -200,7 +194,6 @@ export const getPreviews = (
   // internal previews
   if (!isShare() || getSettingBool("share_preview")) {
     previews.forEach((preview) => {
-      if (isShare() && preview.key === "text_editor") return
       if (preview.provider && !preview.provider.test(file.provider)) {
         return
       }
@@ -265,11 +258,7 @@ export const getPreviews = (
     res.push(downloadComponent)
     if (!isShare() || getSettingBool("share_preview")) {
       const textPreviewsToAdd = previews
-        .filter((p) =>
-          (isShare() ? ["markdown", "markdown_with_word_wrap"] : ["markdown", "markdown_with_word_wrap", "text_editor"]).includes(
-            p.key,
-          ),
-        )
+        .filter((p) => ["markdown", "markdown_with_word_wrap"].includes(p.key))
         .map((p) => ({
           key: p.key,
           name: t(`home.preview.names.${p.key}`),

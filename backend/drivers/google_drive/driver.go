@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -79,13 +80,18 @@ func (d *GoogleDrive) List(ctx context.Context, dir model.Obj, args model.ListAr
 }
 
 func (d *GoogleDrive) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
-	url := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?includeItemsFromAllDrives=true&supportsAllDrives=true", getReadID(file))
-	_, err := d.request(url, http.MethodGet, nil, nil)
+	fileURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?includeItemsFromAllDrives=true&supportsAllDrives=true", getReadID(file))
+	var metadata File
+	_, err := d.request(fileURL, http.MethodGet, nil, &metadata)
 	if err != nil {
 		return nil, err
 	}
+	contentURL := fileURL + "&alt=media&acknowledgeAbuse=true"
+	if metadata.MimeType == "application/vnd.google-apps.document" {
+		contentURL = fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s/export?mimeType=%s", getReadID(file), url.QueryEscape("text/markdown"))
+	}
 	link := model.Link{
-		URL: url + "&alt=media&acknowledgeAbuse=true",
+		URL: contentURL,
 		Header: http.Header{
 			"Authorization": []string{"Bearer " + d.AccessToken},
 		},

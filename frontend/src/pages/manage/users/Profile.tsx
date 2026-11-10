@@ -13,7 +13,7 @@ import {
 import { createSignal, Show } from "solid-js"
 import { useFetch, useManageTitle, useRouter, useT } from "~/hooks"
 import { setMe, me, setSettings } from "~/store"
-import { PEmptyResp } from "~/types"
+import { EmptyResp, PEmptyResp } from "~/types"
 import {
   handleResp,
   notify,
@@ -106,9 +106,7 @@ const Profile = () => {
     {
       value: "0",
       label:
-        localStorage.getItem("lang") === "en"
-          ? "Never Timeout"
-          : "永不超时",
+        localStorage.getItem("lang") === "en" ? "Never Timeout" : "永不超时",
     },
     {
       value: "custom",
@@ -146,7 +144,7 @@ const Profile = () => {
     setSavingTimeout(true)
     let settingSuccess = true
     try {
-      const resp = await r.post("/admin/setting/save", [
+      const resp = await r.post<unknown, EmptyResp>("/admin/setting/save", [
         {
           key: "session_timeout_minutes",
           value: String(targetMinutes),
@@ -279,7 +277,7 @@ const Profile = () => {
             <Input
               id="password"
               type="password"
-              autoComplete="new-password"
+              autocomplete="new-password"
               placeholder="********"
               value={password()}
               onInput={(e) => {
@@ -295,7 +293,7 @@ const Profile = () => {
             <Input
               id="confirm-password"
               type="password"
-              autoComplete="new-password"
+              autocomplete="new-password"
               placeholder="********"
               value={confirmPassword()}
               onInput={(e) => {

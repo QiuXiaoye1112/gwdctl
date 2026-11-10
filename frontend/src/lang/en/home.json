@@ -38,7 +38,7 @@
       "flash": "Flash Player",
       "markdown_with_word_wrap": "Markdown Render (with word wrap)",
       "url_open": "URL Open",
-      "text_editor": "Text Editor",
+
       "image": "Image Viewer",
       "video": "Video Player",
       "audio": "Audio Player",
@@ -319,17 +319,6 @@
       "direct": "Direct",
       "dblclick": "Double click",
       "disable_while_checked": "Disable while checked"
-    },
-    "editor_font_size": "Editor font size",
-    "editor_word_wrap": "Editor word wrap",
-    "editor_word_wrap_options": {
-      "false": "Off",
-      "true": "On"
-    },
-    "editor_minimap": "Editor minimap",
-    "editor_minimap_options": {
-      "false": "Off",
-      "true": "On"
     },
     "show_gallery_thumbnails": "Show gallery thumbnails",
     "show_gallery_thumbnails_options": {

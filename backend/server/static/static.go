@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/OpenListTeam/OpenList/v4/drivers/base"
@@ -42,7 +43,9 @@ func initStatic() {
 		if err != nil {
 			utils.Log.Fatalf("failed to read dist dir: %v", err)
 		}
-		static = dist
+		archiveDir := filepath.Join(conf.DataDir, "web-assets")
+		archiveAssets(dist, archiveDir)
+		static = assetOverlay{current: dist, archive: os.DirFS(archiveDir)}
 		utils.Log.Debug("Using embedded dist directory")
 		return
 	}
@@ -219,11 +222,16 @@ func Static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc)) {
 
 	utils.Log.Debug("Setting up catch-all route...")
 	noRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		if c.Request.Method != "GET" && c.Request.Method != "POST" {
 			c.Status(405)
 			return
 		}
 		c.Header("Content-Type", "text/html")
+		c.Header("Cache-Control", "no-cache")
 		c.Status(200)
 		if strings.HasPrefix(c.Request.URL.Path, "/@manage") {
 			_, _ = c.Writer.WriteString(conf.ManageHtml)

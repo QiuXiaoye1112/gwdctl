@@ -57,6 +57,21 @@ type FsListResp struct {
 	DirectUploadTools  []string  `json:"direct_upload_tools,omitempty"`
 }
 
+// Google Docs are exported as Markdown and should be offered as text previews.
+func objPreviewType(obj model.Obj) int {
+	for current := obj; current != nil; {
+		if m, ok := current.(interface{ GetNativeMimeType() string }); ok && m.GetNativeMimeType() == "application/vnd.google-apps.document" {
+			return conf.TEXT
+		}
+		if wrapped, ok := current.(model.ObjUnwrap); ok {
+			current = wrapped.Unwrap()
+		} else {
+			break
+		}
+	}
+	return utils.GetObjType(obj.GetName(), obj.IsDir())
+}
+
 func FsListSplit(c *gin.Context) {
 	var req ListReq
 	if err := c.ShouldBind(&req); err != nil {
@@ -240,7 +255,7 @@ func toObjsResp(objs []model.Obj, parent string, encrypt bool) []ObjResp {
 			HashInfo:     obj.GetHash().Export(),
 			Sign:         common.Sign(obj, parent, encrypt),
 			Thumb:        thumb,
-			Type:         utils.GetObjType(obj.GetName(), obj.IsDir()),
+			Type:         objPreviewType(obj),
 			MountDetails: mountDetails,
 		})
 	}
@@ -368,7 +383,7 @@ func FsGet(c *gin.Context, req *FsGetReq, user *model.User) {
 			HashInfoStr:  obj.GetHash().String(),
 			HashInfo:     obj.GetHash().Export(),
 			Sign:         common.Sign(obj, parentPath, isEncrypt(meta, reqPath)),
-			Type:         utils.GetObjType(obj.GetName(), obj.IsDir()),
+			Type:         objPreviewType(obj),
 			Thumb:        thumb,
 			MountDetails: mountDetails,
 		},

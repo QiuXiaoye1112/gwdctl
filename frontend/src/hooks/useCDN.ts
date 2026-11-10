@@ -35,12 +35,6 @@ export const useCDN = () => {
     return `${resource}/${path}`
   }
 
-  const monacoPath = () => {
-    return import.meta.env.VITE_LITE === "true"
-      ? npm("monaco-editor", dep("monaco-editor"), "min/vs")
-      : `${static_path}/monaco-editor/vs`
-  }
-
   const katexCSSPath = () => {
     return import.meta.env.VITE_LITE === "true"
       ? npm("katex", dep("katex"), "dist/katex.min.css")
@@ -80,7 +74,6 @@ export const useCDN = () => {
   return {
     npm,
     res,
-    monacoPath,
     katexCSSPath,
     mermaidJSPath,
     libHeifPath,

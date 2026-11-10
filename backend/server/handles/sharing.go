@@ -55,7 +55,7 @@ func SharingGet(c *gin.Context, req *FsGetReq) {
 			HashInfoStr: obj.GetHash().String(),
 			HashInfo:    obj.GetHash().Export(),
 			Sign:        "",
-			Type:        utils.GetObjType(obj.GetName(), obj.IsDir()),
+			Type:        objPreviewType(obj),
 			Thumb:       thumb,
 		},
 		RawURL:   url,
@@ -94,7 +94,7 @@ func SharingList(c *gin.Context, req *ListReq) {
 				HashInfo:    obj.GetHash().Export(),
 				Sign:        "",
 				Thumb:       thumb,
-				Type:        utils.GetObjType(obj.GetName(), obj.IsDir()),
+				Type:        objPreviewType(obj),
 			}
 		}),
 		Total:    int64(total),
