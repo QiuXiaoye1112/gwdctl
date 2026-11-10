@@ -1,6 +1,7 @@
 package data
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -90,6 +91,46 @@ func initSettings() {
 			op.SettingCacheUpdate()
 		}
 	}
+	removePDFJSPreview()
+}
+
+// Preserve other preview providers while removing the retired PDF.js entry.
+func removePDFJSPreview() {
+	item, err := db.GetSettingItemByKey("iframe_previews")
+	if err != nil {
+		return
+	}
+	value, changed := stripPDFJSPreview(item.Value)
+	if !changed {
+		return
+	}
+	item.Value = value
+	if err := op.SaveSettingItem(item); err != nil {
+		utils.Log.Warnf("failed to remove retired PDF.js preview: %v", err)
+	}
+}
+
+func stripPDFJSPreview(value string) (string, bool) {
+	var previews map[string]map[string]string
+	if err := json.Unmarshal([]byte(value), &previews); err != nil {
+		return value, false
+	}
+	pdf, ok := previews["pdf"]
+	if !ok {
+		return value, false
+	}
+	if _, ok := pdf["PDF.js"]; !ok {
+		return value, false
+	}
+	delete(pdf, "PDF.js")
+	if len(pdf) == 0 {
+		delete(previews, "pdf")
+	}
+	updated, err := json.Marshal(previews)
+	if err != nil {
+		return value, false
+	}
+	return string(updated), true
 }
 
 func InitialSettings() []model.SettingItem {
@@ -134,9 +175,6 @@ func InitialSettings() []model.SettingItem {
 		"Microsoft":"https://view.officeapps.live.com/op/view.aspx?src=$e_url",
 		"Google":"https://docs.google.com/gview?url=$e_url&embedded=true"
 	},
-	"pdf": {
-		"PDF.js":"https://res.oplist.org/pdf.js/web/viewer.html?file=$e_url"
-	},
 	"epub": {
 		"EPUB.js":"https://res.oplist.org/epub.js/viewer.html?url=$e_url"
 	}
@@ -144,9 +182,6 @@ func InitialSettings() []model.SettingItem {
 		//		{Key: conf.OfficeViewers, Value: `{
 		//	"Microsoft":"https://view.officeapps.live.com/op/view.aspx?src=$url",
 		//	"Google":"https://docs.google.com/gview?url=$url&embedded=true",
-		//}`, Type: conf.TypeText, Group: model.PREVIEW},
-		//		{Key: conf.PdfViewers, Value: `{
-		//	"pdf.js":"https://openlistteam.github.io/pdf.js/web/viewer.html?file=$url"
 		//}`, Type: conf.TypeText, Group: model.PREVIEW},
 		{Key: "audio_cover", Value: "https://res.oplist.org/logo/logo.svg", MigrationValue: "https://cdn.oplist.org/gh/OpenListTeam/Logo@main/logo.svg", Type: conf.TypeString, Group: model.PREVIEW},
 		{Key: conf.AudioAutoplay, Value: "true", Type: conf.TypeBool, Group: model.PREVIEW},

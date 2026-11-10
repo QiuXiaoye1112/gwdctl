@@ -3,12 +3,11 @@ import { createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useRouter, useLink } from "~/hooks"
 import { getMainColor, getSettingBool, objStore } from "~/store"
 import { ObjType } from "~/types"
-import { ext, pathDir, pathJoin, safeJsonParse } from "~/utils"
+import { ext, pathDir, pathJoin } from "~/utils"
 import Artplayer, { type Option, type Setting, type Events } from "artplayer"
 import artplayerProxyMediabunny from "~/components/artplayer-proxy-mediabunny"
 import { attachMediabunnyAudio } from "~/components/artplayer-proxy-mediabunny/AudioPatch"
 import { prefetchVideoChunks } from "~/components/artplayer-proxy-mediabunny/Prefetcher"
-import artplayerPluginDanmuku from "artplayer-plugin-danmuku"
 
 // MediaBunny 播放器模式：三档选择
 //   "disabled"   - 禁用（使用原生 <video>，默认）
@@ -29,7 +28,6 @@ function setMediaBunnyMode(mode: MediaBunnyMode) {
 function isMediaBunnyEnabled(): boolean {
   return getMediaBunnyMode() !== "disabled"
 }
-import { type Option as DanmukuOption } from "artplayer-plugin-danmuku"
 import artplayerPluginAss from "~/components/artplayer-plugin-ass"
 import mpegts from "mpegts.js"
 import Hls from "hls.js"
@@ -196,15 +194,6 @@ const Preview = () => {
     }
     return false
   })
-  const danmu = objStore.related.find((obj) => {
-    for (const ext of [".xml"]) {
-      if (obj.name.endsWith(ext)) {
-        return true
-      }
-    }
-    return false
-  })
-
   // TODO: add a switch in manage panel to choose whether to enable `libass-wasm`
   const enableEnhanceAss = true
 
@@ -322,26 +311,6 @@ const Preview = () => {
     }
   }
 
-  if (danmu) {
-    option.plugins?.push(
-      artplayerPluginDanmuku({
-        speed: 5,
-        opacity: 1,
-        fontSize: 25,
-        mode: 0,
-        antiOverlap: false,
-        synchronousPlayback: false,
-        theme: "dark",
-        heatmap: true,
-        // 配置来自 localStorage，可能被旧版本或用户改坏，解析失败时忽略即可
-        ...safeJsonParse<Partial<DanmukuOption>>(
-          localStorage.getItem("danmuku_config"),
-        ),
-        emitter: false,
-        danmuku: proxyLink(danmu, true),
-      }),
-    )
-  }
   // 添加 MediaBunny 播放器三档模式选择到设置菜单
   const mediabunnyModeKey = (m: MediaBunnyMode) =>
     m === "disabled"
@@ -386,10 +355,7 @@ const Preview = () => {
     ensureAc3Decoder()
     player = new Artplayer(option)
     // "仅音频"模式：原生 <video> 解码视频，mediabunny 只提供音轨（仅直链模式）
-    if (
-      getMediaBunnyMode() === "audio_only" &&
-      objStore.raw_url
-    ) {
+    if (getMediaBunnyMode() === "audio_only" && objStore.raw_url) {
       attachMediabunnyAudio(player, objStore.raw_url)
     }
     // 注意每个分支都要 break：旧代码缺少 break 导致 true 一路穿透并被重置为 false
@@ -397,37 +363,6 @@ const Preview = () => {
     player.on("ready", () => {
       player.fullscreen = auto_fullscreen
     })
-    if (danmu) {
-      player.on("artplayerPluginDanmuku:config", (option) => {
-        const {
-          speed,
-          margin,
-          opacity,
-          mode,
-          modes,
-          fontSize,
-          antiOverlap,
-          synchronousPlayback,
-          heatmap,
-          visible,
-        } = option as DanmukuOption
-        localStorage.setItem(
-          "danmuku_config",
-          JSON.stringify({
-            speed,
-            margin,
-            opacity,
-            mode,
-            modes,
-            fontSize,
-            antiOverlap,
-            synchronousPlayback,
-            heatmap,
-            visible,
-          }),
-        )
-      })
-    }
     player.on("video:ended", () => {
       if (!autoNext()) return
       next_video()

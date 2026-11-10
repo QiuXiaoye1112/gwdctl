@@ -1,4 +1,10 @@
 {
+  "torrent_readonly": {
+    "loading": "Reading torrent…",
+    "failed": "Unable to read the torrent file.",
+    "summary": "{{count}} files · {{size}}",
+    "pieces": "{{count}} pieces, {{size}} each"
+  },
   "obj": {
     "name": "Name",
     "size": "Size",

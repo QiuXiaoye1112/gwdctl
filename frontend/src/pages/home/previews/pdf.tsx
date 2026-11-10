@@ -31,6 +31,11 @@ const PDFViewer = () => {
           "panel-comment",
           "document-print",
           "document-protect",
+          "document-open",
+          "document-close",
+          "document-capture",
+          "document-export",
+          "document-menu",
         ],
         permissions: {
           overrides: {

@@ -33,7 +33,7 @@
     "build": "node ./scripts/i18n.mjs && vite build",
     "build:lite": "node ./scripts/i18n.mjs && cross-env VITE_LITE=true vite build",
     "serve": "vite preview",
-    "test": "node --experimental-strip-types --test src/components/artplayer-proxy-mediabunny/EventTarget.test.js src/components/artplayer-proxy-mediabunny/Prefetcher.test.js src/components/artplayer-proxy-mediabunny/pitchPreservingTimeStretch.test.js src/utils/zip_read.test.js src/utils/epub_annotation.test.js src/utils/annotation_queue.test.js",
+    "test": "node --experimental-strip-types --test src/components/artplayer-proxy-mediabunny/EventTarget.test.js src/components/artplayer-proxy-mediabunny/Prefetcher.test.js src/components/artplayer-proxy-mediabunny/pitchPreservingTimeStretch.test.js src/utils/zip_read.test.js src/utils/epub_annotation.test.js src/utils/annotation_queue.test.js src/pages/home/previews/torrent_parse.test.js",
     "prepare": "husky",
     "lint": "tsc -p tsconfig.json --noEmit",
     "format": "prettier --ignore-path .gitignore -w \"src/**/*.{js,ts,json,css,tsx,jsx}\""
@@ -65,7 +65,6 @@
     "vite-plugin-static-copy": "^3.4.0"
   },
   "dependencies": {
-    "@egjs/view360": "4.0.0-beta.7",
     "@embedpdf/snippet": "^2.15.1",
     "@hope-ui/solid": "github:OpenListTeam/hope-ui#264b7511e37dc6e5a5fb8f67f8801d94a058a700",
     "@jellyfin/libass-wasm": "^4.2.4",
@@ -78,7 +77,6 @@
     "@viselect/vanilla": "^3.10.1",
     "aplayer": "^1.10.1",
     "artplayer": "^5.4.0",
-    "artplayer-plugin-danmuku": "^5.3.0",
     "asciinema-player": "^3.17.0",
     "axios": "^1.20.0",
     "bencode": "^4.0.1",

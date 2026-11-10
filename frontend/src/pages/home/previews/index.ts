@@ -59,6 +59,7 @@ const previews: Preview[] = [
   {
     key: "markdown",
     type: ObjType.TEXT,
+    exts: ["plist"],
     component: lazy(() => import("./markdown")),
     prior: true,
   },
@@ -71,6 +72,7 @@ const previews: Preview[] = [
   {
     key: "markdown_with_word_wrap",
     type: ObjType.TEXT,
+    exts: ["plist"],
     component: lazy(() => import("./markdown_with_word_wrap")),
     prior: true,
   },
@@ -97,18 +99,6 @@ const previews: Preview[] = [
     key: "audio",
     type: ObjType.AUDIO,
     component: lazy(() => import("./audio")),
-    prior: true,
-  },
-  {
-    key: "ipa",
-    exts: ["ipa", "tipa"],
-    component: lazy(() => import("./ipa")),
-    prior: true,
-  },
-  {
-    key: "plist",
-    exts: ["plist"],
-    component: lazy(() => import("./plist")),
     prior: true,
   },
 
@@ -147,14 +137,8 @@ const previews: Preview[] = [
     prior: true,
   },
   {
-    key: "video360",
-    type: ObjType.VIDEO,
-    component: lazy(() => import("./video360")),
-    prior: true,
-  },
-  {
     key: "torrent",
-    exts: ["torrent", "cas", "oss"],
+    exts: ["torrent"],
     component: lazy(() => import("./torrent")),
     prior: true,
   },

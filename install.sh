@@ -49,7 +49,7 @@ rollback() {
 trap rollback EXIT
 
 info "正在下载 Google Drive 服务端程序..."
-BIN_URL="https://github.com/${REPO}/releases/download/v1.0.6/gwd-linux-amd64.gz"
+BIN_URL="https://github.com/${REPO}/releases/download/v1.0.7/gwd-linux-amd64.gz"
 
 curl -fL --retry 3 --connect-timeout 15 "$BIN_URL" -o "${tmp_dir}/gwd.gz" || die "下载服务端程序失败。"
 

@@ -1,4 +1,10 @@
 {
+  "torrent_readonly": {
+    "loading": "正在读取种子文件…",
+    "failed": "无法读取种子文件。",
+    "summary": "{{count}} 个文件 · {{size}}",
+    "pieces": "{{count}} 个分片，每片 {{size}}"
+  },
   "obj": {
     "name": "名称",
     "size": "大小",
