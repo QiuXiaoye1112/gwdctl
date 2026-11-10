@@ -78,7 +78,10 @@ func Start() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	_ = r.SetTrustedProxies(nil)
+	// Only the local reverse proxy may supply the client address.
+	if err := r.SetTrustedProxies([]string{"127.0.0.1/32", "::1/128"}); err != nil {
+		panic(err)
+	}
 
 	// gin log
 	if conf.Conf.Log.Filter.Enable {
