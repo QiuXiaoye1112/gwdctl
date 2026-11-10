@@ -189,7 +189,7 @@ export const isIndeterminate = () => {
 
 const selectedNum = createMemo(() => selectedObjs().length)
 
-export type LayoutType = "list" | "grid" | "image"
+export type LayoutType = "list" | "grid"
 const [pathname, setPathname] = createSignal<string>(location.pathname)
 let layoutRecord: Record<string, LayoutType> = (() => {
   try {
@@ -199,9 +199,8 @@ let layoutRecord: Record<string, LayoutType> = (() => {
   }
 })()
 
-const [layoutRecordsSignal, setLayoutRecordsSignal] = createSignal<
-  Record<string, LayoutType>
->(layoutRecord)
+const [layoutRecordsSignal, setLayoutRecordsSignal] =
+  createSignal<Record<string, LayoutType>>(layoutRecord)
 
 export const clearLayoutRecord = () => {
   layoutRecord = {}
@@ -218,7 +217,8 @@ export const layout = createMemo<LayoutType>(() => {
   const records = layoutRecordsSignal()
   const custom = records[currentPath]
   const globalDefault = (local["global_default_layout"] as LayoutType) || "list"
-  return custom || globalDefault
+  if (custom === "list" || custom === "grid") return custom
+  return globalDefault === "grid" ? "grid" : "list"
 })
 
 export const setLayout = (layout: LayoutType) => {

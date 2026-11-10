@@ -14,13 +14,7 @@ export const initialLocalSettings = [
     key: "global_default_layout",
     default: "list",
     type: "select",
-    options: ["list", "grid", "image"],
-  },
-  {
-    key: "show_folder_in_image_view",
-    default: "top",
-    type: "select",
-    options: ["top", "bottom", "none"],
+    options: ["list", "grid"],
   },
   {
     key: "show_sidebar",
@@ -73,6 +67,10 @@ export const initialLocalSettings = [
   },
 ]
 export type LocalSetting = (typeof initialLocalSettings)[number]
+if (local["global_default_layout"] === "image") {
+  setLocal("global_default_layout", "list")
+}
+remove("show_folder_in_image_view")
 for (const setting of initialLocalSettings) {
   if (!local[setting.key]) {
     setLocal(setting.key, setting.default)

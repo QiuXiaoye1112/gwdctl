@@ -56,8 +56,7 @@
   },
   "layouts": {
     "list": "列表视图",
-    "grid": "网格视图",
-    "image": "图片视图"
+    "grid": "网格视图"
   },
   "no_images": "当前文件夹中没有图片",
   "load_more": "加载更多",
@@ -287,17 +286,10 @@
     "aria2_rpc_url": "Aria2 RPC 链接",
     "aria2_rpc_secret": "Aria2 RPC 密钥",
     "aria2_dir": "Aria2 下载目录",
-    "show_folder_in_image_view": "显示文件夹为图片视图",
-    "show_folder_in_image_view_options": {
-      "top": "上方",
-      "bottom": "下方",
-      "none": "隐藏"
-    },
     "global_default_layout": "全局默认布局",
     "global_default_layout_options": {
       "list": "列表视图",
-      "grid": "网格视图",
-      "image": "图片视图"
+      "grid": "网格视图"
     },
     "position_of_header_navbar": "标题栏和导航栏的位置",
     "position_of_header_navbar_options": {

@@ -27,7 +27,6 @@ import { Search } from "./Search"
 
 const ListLayout = lazy(() => import("./List"))
 const GridLayout = lazy(() => import("./Grid"))
-const ImageLayout = lazy(() => import("./Images"))
 
 const Folder = () => {
   const { pathname } = useRouter()
@@ -88,9 +87,6 @@ const Folder = () => {
         </Match>
         <Match when={layout() === "grid"}>
           <GridLayout />
-        </Match>
-        <Match when={layout() === "image"}>
-          <ImageLayout images={images()} />
         </Match>
       </Switch>
       <Pager />

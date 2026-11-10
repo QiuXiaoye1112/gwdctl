@@ -56,8 +56,7 @@
   },
   "layouts": {
     "list": "List View",
-    "grid": "Grid View",
-    "image": "Image View"
+    "grid": "Grid View"
   },
   "no_images": "No images in the current folder",
   "load_more": "Load more",
@@ -287,17 +286,10 @@
     "aria2_rpc_url": "Aria2 RPC URL",
     "aria2_rpc_secret": "Aria2 RPC secret",
     "aria2_dir": "Aria2 download directory",
-    "show_folder_in_image_view": "Show folder in image view",
-    "show_folder_in_image_view_options": {
-      "top": "Top",
-      "bottom": "Bottom",
-      "none": "None"
-    },
     "global_default_layout": "Global default layout",
     "global_default_layout_options": {
       "list": "List View",
-      "grid": "Grid View",
-      "image": "Image View"
+      "grid": "Grid View"
     },
     "position_of_header_navbar": "Position of header & nav bar",
     "position_of_header_navbar_options": {
