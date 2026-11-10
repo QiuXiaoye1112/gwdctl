@@ -29,6 +29,8 @@ const PDFViewer = () => {
           "form",
           "history",
           "panel-comment",
+          "document-print",
+          "document-protect",
         ],
         permissions: {
           overrides: {
