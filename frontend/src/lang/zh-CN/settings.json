@@ -126,7 +126,7 @@
   "ocr_api": "OCR 接口",
   "offline_download_task_threads_num": "离线下载任务线程数",
   "offline_download_transfer_task_threads_num": "离线下载传输任务线程数",
-  "package_download": "打包下载",
+  "package_download": "ZIP 下载",
   "pagination_type": "分页类型",
   "pagination_types": {
     "all": "全部",
