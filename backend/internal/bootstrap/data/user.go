@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/OpenListTeam/OpenList/v4/cmd/flags"
-	"github.com/OpenListTeam/OpenList/v4/internal/db"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/internal/op"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
@@ -16,7 +15,6 @@ import (
 
 func initUser() {
 	initAdmin()
-	initGuest()
 }
 
 func initAdmin() {
@@ -55,30 +53,6 @@ func initAdmin() {
 			}
 		} else {
 			utils.Log.Fatalf("[init user] Failed to get admin user: %v", err)
-		}
-	}
-}
-
-func initGuest() {
-	_, err := op.GetGuest()
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			salt := random.String(16)
-			guest := &model.User{
-				Username:   "guest",
-				PwdHash:    model.TwoHashPwd("guest", salt),
-				Salt:       salt,
-				Role:       model.GUEST,
-				BasePath:   "/",
-				Permission: 0,
-				Disabled:   true,
-				Authn:      "[]",
-			}
-			if err := db.CreateUser(guest); err != nil {
-				utils.Log.Fatalf("[init user] Failed to create guest user: %v", err)
-			}
-		} else {
-			utils.Log.Fatalf("[init user] Failed to get guest user: %v", err)
 		}
 	}
 }

@@ -69,9 +69,9 @@ func FsListSplit(c *gin.Context) {
 		SharingList(c, &req)
 		return
 	}
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if user.IsGuest() && user.Disabled {
-		common.ErrorStrResp(c, "Guest user is disabled, login please", 401)
+	user, ok := c.Request.Context().Value(conf.UserKey).(*model.User)
+	if !ok || user == nil {
+		common.ErrorStrResp(c, "Please login first", 401)
 		return
 	}
 	FsList(c, &req, user)
@@ -272,9 +272,9 @@ func FsGetSplit(c *gin.Context) {
 		SharingGet(c, &req)
 		return
 	}
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if user.IsGuest() && user.Disabled {
-		common.ErrorStrResp(c, "Guest user is disabled, login please", 401)
+	user, ok := c.Request.Context().Value(conf.UserKey).(*model.User)
+	if !ok || user == nil {
+		common.ErrorStrResp(c, "Please login first", 401)
 		return
 	}
 	FsGet(c, &req, user)

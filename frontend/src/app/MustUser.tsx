@@ -24,7 +24,8 @@ const MustUser = (props: { children: JSXElement }) => {
   )
 }
 
-const UserOrGuest = (props: { children: JSXElement }) => {
+// Anonymous share viewers do not have a user account.
+const PublicShare = (props: { children: JSXElement }) => {
   // 将loading默认设置为true，修复children被提前渲染，明显症状：两个公告
   const [loading, data] = useFetch((): PResp<Me> => r.get("/me"), true)
   const [skipLogin, setSkipLogin] = createSignal(false)
@@ -32,7 +33,7 @@ const UserOrGuest = (props: { children: JSXElement }) => {
     handleRespWithoutAuthAndNotify(await data(), setMe, (_msg, _code) => {
       setMe({
         id: 0,
-        username: "guest",
+        username: "",
         password: "",
         base_path: "/",
         role: UserRole.GUEST,
@@ -54,4 +55,4 @@ const UserOrGuest = (props: { children: JSXElement }) => {
   )
 }
 
-export { MustUser, UserOrGuest }
+export { MustUser, PublicShare }

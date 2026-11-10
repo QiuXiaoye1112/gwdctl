@@ -65,7 +65,6 @@ func TestGalleryAndSingleFileUseSignedProxy(t *testing.T) {
 	}
 	db.Init(database)
 	defer func() {
-		_ = op.DelUserCache("guest")
 		op.SettingCacheUpdate()
 		db.Close()
 	}()
@@ -73,9 +72,6 @@ func TestGalleryAndSingleFileUseSignedProxy(t *testing.T) {
 		if err := db.SaveSettingItem(&item); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := db.CreateUser(&model.User{Username: "guest", Role: model.GUEST, Disabled: true, BasePath: "/"}); err != nil {
-		t.Fatal(err)
 	}
 	op.SettingCacheUpdate()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

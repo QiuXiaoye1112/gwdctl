@@ -20,17 +20,6 @@ type LoginReq struct {
 	OtpCode  string `json:"otp_code"`
 }
 
-// Login Deprecated
-func Login(c *gin.Context) {
-	var req LoginReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
-		return
-	}
-	req.Password = model.StaticHash(req.Password)
-	loginHash(c, &req)
-}
-
 // LoginHash login with password hashed by sha256
 func LoginHash(c *gin.Context) {
 	var req LoginReq
@@ -95,7 +84,6 @@ type UserResp struct {
 }
 
 // CurrentUser get current user by token
-// if token is empty, return guest user
 func CurrentUser(c *gin.Context) {
 	user := c.Request.Context().Value(conf.UserKey).(*model.User)
 	userResp := UserResp{

@@ -34,7 +34,7 @@ import {
   setupSessionSecurity,
 } from "~/utils"
 import { applyCustomize } from "~/utils/customize"
-import { MustUser, UserOrGuest } from "./MustUser"
+import { MustUser, PublicShare } from "./MustUser"
 import "./index.css"
 import { globalStyles } from "./theme"
 
@@ -158,9 +158,9 @@ const App: Component = () => {
                 <Route
                   path="/share/*"
                   element={
-                    <UserOrGuest>
+                    <PublicShare>
                       <Home />
-                    </UserOrGuest>
+                    </PublicShare>
                   }
                 />
                 <Route

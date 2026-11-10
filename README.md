@@ -14,6 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/QiuXiaoye1112/gwdctl/main/install.s
 gwdctl
 ```
 
+网盘使用单一管理员账号，不提供访客账号或访客浏览模式。公开分享链接仍可由持有链接的访客按分享规则访问。
+
 ## Nginx 反向代理
 
 服务默认只监听 `127.0.0.1:5244`，并仅信任本机代理提供的客户端 IP。Nginx 的代理位置必须覆盖客户端传入的转发头，不要直接追加客户端提供的 `X-Forwarded-For`：

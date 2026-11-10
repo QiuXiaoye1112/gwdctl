@@ -81,9 +81,9 @@ func FsArchiveMetaSplit(c *gin.Context) {
 		SharingArchiveMeta(c, &req)
 		return
 	}
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if user.IsGuest() && user.Disabled {
-		common.ErrorStrResp(c, "Guest user is disabled, login please", 401)
+	user, ok := c.Request.Context().Value(conf.UserKey).(*model.User)
+	if !ok || user == nil {
+		common.ErrorStrResp(c, "Please login first", 401)
 		return
 	}
 	FsArchiveMeta(c, &req, user)
@@ -164,9 +164,9 @@ func FsArchiveListSplit(c *gin.Context) {
 		SharingArchiveList(c, &req)
 		return
 	}
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if user.IsGuest() && user.Disabled {
-		common.ErrorStrResp(c, "Guest user is disabled, login please", 401)
+	user, ok := c.Request.Context().Value(conf.UserKey).(*model.User)
+	if !ok || user == nil {
+		common.ErrorStrResp(c, "Please login first", 401)
 		return
 	}
 	FsArchiveList(c, &req, user)

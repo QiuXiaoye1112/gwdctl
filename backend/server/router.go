@@ -3,7 +3,6 @@ package server
 import (
 	"github.com/OpenListTeam/OpenList/v4/cmd/flags"
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
-	"github.com/OpenListTeam/OpenList/v4/internal/message"
 	multipartPkg "github.com/OpenListTeam/OpenList/v4/internal/multipart"
 	"github.com/OpenListTeam/OpenList/v4/internal/sign"
 	"github.com/OpenListTeam/OpenList/v4/internal/stream"
@@ -67,7 +66,6 @@ func Init(e *gin.Engine) {
 	api := g.Group("/api")
 	ownerAuth := api.Group("", middlewares.RequireOwner)
 
-	api.POST("/auth/login", handles.Login)
 	api.POST("/auth/login/hash", handles.LoginHash)
 	ownerAuth.GET("/me", handles.CurrentUser)
 	ownerAuth.POST("/me/update", handles.UpdateCurrent)
@@ -83,7 +81,7 @@ func Init(e *gin.Engine) {
 	public.POST("/init/setup", handles.InitSetup)
 
 	_fs(ownerAuth.Group("/fs"))
-	fsAndShare(api.Group("/fs", middlewares.Auth(true)))
+	fsAndShare(api.Group("/fs", middlewares.ShareOrOwner()))
 	_task(ownerAuth.Group("/task"))
 	_sharing(ownerAuth.Group("/share"))
 	admin(ownerAuth.Group("/admin"))
@@ -109,21 +107,6 @@ func admin(g *gin.RouterGroup) {
 
 	_task(g.Group("/task"))
 
-	ms := g.Group("/message")
-	ms.POST("/get", message.HttpInstance.GetHandle)
-	ms.POST("/send", message.HttpInstance.SendHandle)
-
-	index := g.Group("/index")
-	index.POST("/build", middlewares.SearchIndex, handles.BuildIndex)
-	index.POST("/update", middlewares.SearchIndex, handles.UpdateIndex)
-	index.POST("/stop", middlewares.SearchIndex, handles.StopIndex)
-	index.POST("/clear", middlewares.SearchIndex, handles.ClearIndex)
-	index.GET("/progress", middlewares.SearchIndex, handles.GetProgress)
-
-	scan := g.Group("/scan")
-	scan.POST("/start", handles.StartManualScan)
-	scan.POST("/stop", handles.StopManualScan)
-	scan.GET("/progress", handles.GetManualScanProgress)
 }
 
 func fsAndShare(g *gin.RouterGroup) {

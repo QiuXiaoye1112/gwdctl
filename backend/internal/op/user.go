@@ -9,7 +9,6 @@ import (
 )
 
 var userG singleflight.Group[*model.User]
-var guestUser *model.User
 var adminUser *model.User
 
 func GetAdmin() (*model.User, error) {
@@ -32,17 +31,6 @@ func GetOwner() (*model.User, error) {
 func UpdateOwner(u *model.User) error {
 	u.Role = model.ADMIN
 	return UpdateUser(u)
-}
-
-func GetGuest() (*model.User, error) {
-	if guestUser == nil {
-		user, err := db.GetUserByRole(model.GUEST)
-		if err != nil {
-			return nil, err
-		}
-		guestUser = user
-	}
-	return guestUser, nil
 }
 
 func GetUserByRole(role int) (*model.User, error) {
@@ -100,9 +88,6 @@ func UpdateUser(u *model.User) error {
 	if u.IsAdmin() {
 		adminUser = nil
 	}
-	if u.IsGuest() {
-		guestUser = nil
-	}
 	Cache.DeleteUser(old.Username)
 	u.BasePath = utils.FixAndCleanPath(u.BasePath)
 	return db.UpdateUser(u)
@@ -132,9 +117,6 @@ func DelUserCache(username string) error {
 	}
 	if user.IsAdmin() {
 		adminUser = nil
-	}
-	if user.IsGuest() {
-		guestUser = nil
 	}
 	Cache.DeleteUser(username)
 	return nil

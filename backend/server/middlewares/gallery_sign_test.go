@@ -17,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestGalleryLinksWithGuestDisabledAndSignAllOff(t *testing.T) {
+func TestPrivateGalleryLinksRequireSignatures(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	conf.Conf = conf.DefaultConfig(t.TempDir())
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -26,7 +26,6 @@ func TestGalleryLinksWithGuestDisabledAndSignAllOff(t *testing.T) {
 	}
 	db.Init(database)
 	defer func() {
-		_ = op.DelUserCache("guest")
 		op.SettingCacheUpdate()
 		db.Close()
 	}()
@@ -34,9 +33,6 @@ func TestGalleryLinksWithGuestDisabledAndSignAllOff(t *testing.T) {
 		if err := db.SaveSettingItem(&item); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := db.CreateUser(&model.User{Username: "guest", Role: model.GUEST, Disabled: true, BasePath: "/"}); err != nil {
-		t.Fatal(err)
 	}
 	op.SettingCacheUpdate()
 	router := gin.New()
@@ -68,24 +64,6 @@ func TestGalleryLinksWithGuestDisabledAndSignAllOff(t *testing.T) {
 			}
 		})
 	}
-	t.Run("public access remains unsigned when allowed", func(t *testing.T) {
-		guest, err := op.GetGuest()
-		if err != nil {
-			t.Fatal(err)
-		}
-		guest.Disabled = false
-		if err := op.UpdateUser(guest); err != nil {
-			t.Fatal(err)
-		}
-		if got := common.Sign(&model.Object{Name: "20240623_170544.jpg"}, "/Camera/图片", false); got != "" {
-			t.Fatalf("unexpected signature for public file: %q", got)
-		}
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/d"+url.PathEscape(path), nil))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("public access: got %d", rec.Code)
-		}
-	})
 	t.Run("sign all still rejects unsigned requests", func(t *testing.T) {
 		if err := db.SaveSettingItem(&model.SettingItem{Key: conf.SignAll, Value: "true"}); err != nil {
 			t.Fatal(err)

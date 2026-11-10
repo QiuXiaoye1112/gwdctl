@@ -282,20 +282,6 @@ export const fsSearch = async (
   })
 }
 
-export const buildIndex = async (paths = ["/"], max_depth = -1): PEmptyResp => {
-  return r.post("/admin/index/build", {
-    paths,
-    max_depth,
-  })
-}
-
-export const updateIndex = async (paths = [], max_depth = -1): PEmptyResp => {
-  return r.post("/admin/index/update", {
-    paths,
-    max_depth,
-  })
-}
-
 // ========== Torrent 相关 API ==========
 
 export const torrentParse = (torrent_data: string): PResp<TorrentInfo> => {

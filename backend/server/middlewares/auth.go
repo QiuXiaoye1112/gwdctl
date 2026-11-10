@@ -66,9 +66,9 @@ func RequireOwner(c *gin.Context) {
 	c.Next()
 }
 
-// Auth is a middleware that checks if the user is logged in.
-// if token is empty, set user to guest
-func Auth(allowDisabledGuest bool) func(c *gin.Context) {
+// ShareOrOwner permits anonymous share requests; split handlers reject any
+// anonymous request that does not target a share.
+func ShareOrOwner() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
 		apiToken := setting.GetStr(conf.Token)
@@ -79,25 +79,17 @@ func Auth(allowDisabledGuest bool) func(c *gin.Context) {
 				c.Abort()
 				return
 			}
+			if admin.Disabled {
+				common.ErrorStrResp(c, "Current user is disabled, replace please", 403)
+				c.Abort()
+				return
+			}
 			common.GinAppendValues(c, conf.UserKey, admin)
 			log.Debugf("use admin token: %+v", admin)
 			c.Next()
 			return
 		}
 		if token == "" {
-			guest, err := op.GetGuest()
-			if err != nil {
-				common.ErrorResp(c, err, 500)
-				c.Abort()
-				return
-			}
-			if !allowDisabledGuest && guest.Disabled {
-				common.ErrorStrResp(c, "Guest user is disabled, login please", 401)
-				c.Abort()
-				return
-			}
-			common.GinAppendValues(c, conf.UserKey, guest)
-			log.Debugf("use empty token: %+v", guest)
 			c.Next()
 			return
 		}

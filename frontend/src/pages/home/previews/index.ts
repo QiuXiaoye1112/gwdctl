@@ -57,13 +57,6 @@ const previews: Preview[] = [
     prior: true,
   },
   {
-    key: "aliyun_video",
-    type: ObjType.VIDEO,
-    provider: /^Aliyundrive(Open)?$/,
-    component: lazy(() => import("./aliyun_video")),
-    prior: true,
-  },
-  {
     key: "markdown",
     type: ObjType.TEXT,
     component: lazy(() => import("./markdown")),
