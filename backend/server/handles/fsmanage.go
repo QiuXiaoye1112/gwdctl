@@ -66,120 +66,15 @@ type MoveCopyReq struct {
 
 // FsMove performs batch move (individual item permission checks skipped for performance).
 func FsMove(c *gin.Context) {
-	var req MoveCopyReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
-		return
-	}
-	if len(req.Names) == 0 {
-		common.ErrorStrResp(c, "Empty file names", 400)
-		return
-	}
-	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if !user.CanMove() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
-		return
-	}
-	srcDir, err := user.JoinPath(req.SrcDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
-		return
-	}
-	srcMeta, err := op.GetNearestMeta(srcDir)
-	if err != nil && !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-		common.ErrorResp(c, err, 500, true)
-		return
-	}
-	if !common.CanWrite(user, srcMeta, srcDir) {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
-		return
-	}
-	dstDir, err := user.JoinPath(req.DstDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
-		return
-	}
-	dstMeta, err := op.GetNearestMeta(dstDir)
-	if err != nil && !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-		common.ErrorResp(c, err, 500, true)
-		return
-	}
-	if !common.CanWrite(user, dstMeta, dstDir) {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
-		return
-	}
-	if !strings.HasSuffix(srcDir, "/") {
-		srcDir += "/"
-	}
-	for i, name := range req.Names {
-		if err := checkRelativePath(name); err != nil {
-			common.ErrorResp(c, err, 403)
-			return
-		}
-		// ensure req.Names is not a relative path
-		srcPath := stdpath.Join(srcDir, name)
-		if !strings.HasPrefix(srcPath+"/", srcDir) {
-			req.Names[i] = ""
-			continue
-		}
-		req.Names[i] = srcPath
-		if !req.Overwrite {
-			base := stdpath.Base(srcPath)
-			if base == "." || base == "/" {
-				common.ErrorStrResp(c, fmt.Sprintf("invalid file name [%s]", name), 400)
-				return
-			}
-			if res, _ := fs.Get(c.Request.Context(), stdpath.Join(dstDir, base), &fs.GetArgs{NoLog: true}); res != nil {
-				if !req.SkipExisting {
-					common.ErrorStrResp(c, fmt.Sprintf("file [%s] exists", name), 403)
-					return
-				}
-				req.Names[i] = ""
-				continue
-			}
-		}
-	}
-
-	// Create all tasks immediately without any synchronous validation
-	// All validation will be done asynchronously in the background
-	var addedTasks []task.TaskExtensionInfo
-	for i, p := range req.Names {
-		if p == "" {
-			continue
-		}
-		t, err := fs.Move(c.Request.Context(), p, dstDir, len(req.Names) > i+1)
-		if t != nil {
-			addedTasks = append(addedTasks, t)
-		}
-		if err != nil {
-			common.ErrorResp(c, err, 500)
-			return
-		}
-		if req.FollowSeed {
-			seedTasks, followErr := followSeedTransfer(c, "move", p, dstDir)
-			if followErr != nil {
-				common.ErrorResp(c, followErr, 500)
-				return
-			}
-			addedTasks = append(addedTasks, seedTasks...)
-		}
-	}
-
-	// Return immediately with task information
-	if len(addedTasks) > 0 {
-		common.SuccessResp(c, gin.H{
-			"message": fmt.Sprintf("Successfully created %d move task(s)", len(addedTasks)),
-			"tasks":   getTaskInfos(addedTasks),
-		})
-	} else {
-		common.SuccessResp(c, gin.H{
-			"message": "Move operations completed immediately",
-		})
-	}
+	handleMoveCopy(c, false)
 }
 
 // FsCopy performs batch copy (individual item permission checks skipped for performance).
 func FsCopy(c *gin.Context) {
+	handleMoveCopy(c, true)
+}
+
+func handleMoveCopy(c *gin.Context, isCopy bool) {
 	var req MoveCopyReq
 	if err := c.ShouldBind(&req); err != nil {
 		common.ErrorResp(c, err, 400)
@@ -190,7 +85,7 @@ func FsCopy(c *gin.Context) {
 		return
 	}
 	user := c.Request.Context().Value(conf.UserKey).(*model.User)
-	if !user.CanCopy() {
+	if isCopy && !user.CanCopy() || !isCopy && !user.CanMove() {
 		common.ErrorResp(c, errs.PermissionDenied, 403)
 		return
 	}
@@ -204,7 +99,7 @@ func FsCopy(c *gin.Context) {
 		common.ErrorResp(c, err, 500, true)
 		return
 	}
-	if !common.CanRead(user, srcMeta, srcDir) {
+	if (isCopy && !common.CanRead(user, srcMeta, srcDir)) || (!isCopy && !common.CanWrite(user, srcMeta, srcDir)) {
 		common.ErrorResp(c, errs.PermissionDenied, 403)
 		return
 	}
@@ -223,6 +118,18 @@ func FsCopy(c *gin.Context) {
 		return
 	}
 
+	if stdpath.Clean(srcDir) == stdpath.Clean(dstDir) && req.Overwrite {
+		common.ErrorStrResp(c, "cannot move or copy to the same directory", 400)
+		return
+	}
+
+	dstObjs, err := fs.List(c.Request.Context(), dstDir, &fs.ListArgs{Refresh: true, NoLog: true})
+	if err != nil {
+		common.ErrorResp(c, err, 500)
+		return
+	}
+	dstByName := indexObjsByName(dstObjs)
+
 	if !strings.HasSuffix(srcDir, "/") {
 		srcDir += "/"
 	}
@@ -238,36 +145,77 @@ func FsCopy(c *gin.Context) {
 			continue
 		}
 		req.Names[i] = srcPath
-		if !req.Overwrite {
-			base := stdpath.Base(srcPath)
-			if base == "." || base == "/" {
-				common.ErrorStrResp(c, fmt.Sprintf("invalid file name [%s]", name), 400)
-				return
-			}
-			if res, _ := fs.Get(c.Request.Context(), stdpath.Join(dstDir, base), &fs.GetArgs{NoLog: true}); res != nil {
-				if !req.SkipExisting && !req.Merge {
-					common.ErrorStrResp(c, fmt.Sprintf("file [%s] exists", name), 403)
-					return
-				} else if !req.Merge || !res.IsDir() {
+		base := stdpath.Base(srcPath)
+		if base == "." || base == "/" {
+			common.ErrorStrResp(c, fmt.Sprintf("invalid file name [%s]", name), 400)
+			return
+		}
+
+		dstMatches := dstByName[base]
+		if len(dstMatches) > 0 {
+			if !req.Overwrite {
+				if isCopy {
+					if !req.SkipExisting && !req.Merge {
+						common.ErrorStrResp(c, fmt.Sprintf("file [%s] exists", name), 403)
+						return
+					} else if !req.Merge || !hasDirObj(dstMatches) {
+						req.Names[i] = ""
+						continue
+					}
+				} else {
+					if !req.SkipExisting {
+						common.ErrorStrResp(c, fmt.Sprintf("file [%s] exists", name), 403)
+						return
+					}
 					req.Names[i] = ""
 					continue
 				}
+			} else {
+				srcObj, err := fs.Get(c.Request.Context(), srcPath, &fs.GetArgs{NoLog: true})
+				if err != nil && !errs.IsObjectNotFound(err) {
+					common.ErrorResp(c, err, 500)
+					return
+				}
+				if srcObj != nil {
+					if _, conflictErr := op.ValidateTransferConflicts(srcObj.IsDir(), srcObj.GetID(), dstMatches, op.TransferOptions{Overwrite: true}); conflictErr != nil {
+						common.ErrorResp(c, conflictErr, 403)
+						return
+					}
+				}
+			}
+		}
+
+		if req.FollowSeed {
+			if err := checkFollowSeedConflicts(c, srcPath, dstByName, req.Overwrite, req.SkipExisting); err != nil {
+				common.ErrorStrResp(c, err.Error(), 403)
+				return
 			}
 		}
 	}
 
-	// Create all tasks immediately without any synchronous validation
-	// All validation will be done asynchronously in the background
+	// Create tasks with overwrite policy propagated into background execution.
 	var addedTasks []task.TaskExtensionInfo
+	opLabel := "move"
+	if isCopy {
+		opLabel = "copy"
+	}
 	for i, p := range req.Names {
 		if p == "" {
 			continue
 		}
+		opts := fs.TransferOptions{
+			SkipHook:  len(req.Names) > i+1,
+			Overwrite: req.Overwrite,
+		}
 		var t task.TaskExtensionInfo
-		if req.Merge {
-			t, err = fs.Merge(c.Request.Context(), p, dstDir, len(req.Names) > i+1)
+		if isCopy {
+			if req.Merge {
+				t, err = fs.MergeWithOptions(c.Request.Context(), p, dstDir, opts)
+			} else {
+				t, err = fs.CopyWithOptions(c.Request.Context(), p, dstDir, opts)
+			}
 		} else {
-			t, err = fs.Copy(c.Request.Context(), p, dstDir, len(req.Names) > i+1)
+			t, err = fs.MoveWithOptions(c.Request.Context(), p, dstDir, opts)
 		}
 		if t != nil {
 			addedTasks = append(addedTasks, t)
@@ -277,7 +225,7 @@ func FsCopy(c *gin.Context) {
 			return
 		}
 		if req.FollowSeed {
-			seedTasks, followErr := followSeedTransfer(c, "copy", p, dstDir)
+			seedTasks, followErr := followSeedTransfer(c, opLabel, p, dstDir, dstByName, req.Overwrite, req.SkipExisting)
 			if followErr != nil {
 				common.ErrorResp(c, followErr, 500)
 				return
@@ -288,15 +236,40 @@ func FsCopy(c *gin.Context) {
 
 	// Return immediately with task information
 	if len(addedTasks) > 0 {
+		msgVerb := "move"
+		if isCopy {
+			msgVerb = "copy"
+		}
 		common.SuccessResp(c, gin.H{
-			"message": fmt.Sprintf("Successfully created %d copy task(s)", len(addedTasks)),
+			"message": fmt.Sprintf("Successfully created %d %s task(s)", len(addedTasks), msgVerb),
 			"tasks":   getTaskInfos(addedTasks),
 		})
 	} else {
+		msgVerb := "Move"
+		if isCopy {
+			msgVerb = "Copy"
+		}
 		common.SuccessResp(c, gin.H{
-			"message": "Copy operations completed immediately",
+			"message": fmt.Sprintf("%s operations completed immediately", msgVerb),
 		})
 	}
+}
+
+func indexObjsByName(objs []model.Obj) map[string][]model.Obj {
+	byName := make(map[string][]model.Obj, len(objs))
+	for _, obj := range objs {
+		byName[obj.GetName()] = append(byName[obj.GetName()], obj)
+	}
+	return byName
+}
+
+func hasDirObj(objs []model.Obj) bool {
+	for _, obj := range objs {
+		if obj.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 type RenameReq struct {
@@ -335,17 +308,18 @@ func FsRename(c *gin.Context) {
 		common.ErrorResp(c, errs.PermissionDenied, 403)
 		return
 	}
-	if !req.Overwrite {
-		dstPath := stdpath.Join(stdpath.Dir(reqPath), req.Name)
-		if dstPath != reqPath {
-			if res, _ := fs.Get(c.Request.Context(), dstPath, &fs.GetArgs{NoLog: true}); res != nil {
-				common.ErrorStrResp(c, fmt.Sprintf("file [%s] exists", req.Name), 403)
-				return
-			}
+	if err := fs.RenameWithOptions(c.Request.Context(), reqPath, req.Name, fs.TransferOptions{Overwrite: req.Overwrite}); err != nil {
+		switch {
+		case errs.IsObjectAlreadyExists(err):
+			common.ErrorStrResp(c, fmt.Sprintf("file [%s] exists", req.Name), 409)
+		case errs.IsObjectNotFound(err):
+			common.ErrorResp(c, err, 404)
+		case strings.Contains(err.Error(), "cannot overwrite folder with file"),
+			strings.Contains(err.Error(), "cannot overwrite file with folder"):
+			common.ErrorStrResp(c, err.Error(), 403)
+		default:
+			common.ErrorResp(c, err, 500)
 		}
-	}
-	if err := fs.Rename(c.Request.Context(), reqPath, req.Name); err != nil {
-		common.ErrorResp(c, err, 500)
 		return
 	}
 	if req.FollowSeed {
@@ -440,23 +414,56 @@ func seedSidecarPaths(filePath string) []string {
 	return []string{filePath + ".oss", filePath + ".torrent", filePath + ".cas", filePath + ".cas.torrent"}
 }
 
-func followSeedTransfer(c *gin.Context, operation, srcPath, dstDir string) ([]task.TaskExtensionInfo, error) {
+func checkFollowSeedConflicts(c *gin.Context, srcPath string, dstByName map[string][]model.Obj, overwrite, skipExisting bool) error {
 	source, err := fs.Get(c.Request.Context(), srcPath, &fs.GetArgs{NoLog: true})
 	if err != nil || source == nil || source.IsDir() {
-		return nil, nil
+		return nil
 	}
-	var tasks []task.TaskExtensionInfo
 	for _, sidecarPath := range seedSidecarPaths(srcPath) {
 		obj, err := fs.Get(c.Request.Context(), sidecarPath, &fs.GetArgs{NoLog: true})
 		if err != nil || obj == nil || obj.IsDir() {
 			continue
 		}
+		sidecarName := stdpath.Base(sidecarPath)
+		dstMatches := dstByName[sidecarName]
+		if len(dstMatches) == 0 {
+			continue
+		}
+		if !overwrite {
+			if !skipExisting {
+				return fmt.Errorf("file [%s] exists", sidecarName)
+			}
+			continue
+		}
+		if _, err := op.ValidateTransferConflicts(obj.IsDir(), obj.GetID(), dstMatches, op.TransferOptions{Overwrite: true}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func followSeedTransfer(c *gin.Context, operation, srcPath, dstDir string, dstByName map[string][]model.Obj, overwrite, skipExisting bool) ([]task.TaskExtensionInfo, error) {
+	source, err := fs.Get(c.Request.Context(), srcPath, &fs.GetArgs{NoLog: true})
+	if err != nil || source == nil || source.IsDir() {
+		return nil, nil
+	}
+	var tasks []task.TaskExtensionInfo
+	opts := fs.TransferOptions{SkipHook: true, Overwrite: overwrite}
+	for _, sidecarPath := range seedSidecarPaths(srcPath) {
+		obj, err := fs.Get(c.Request.Context(), sidecarPath, &fs.GetArgs{NoLog: true})
+		if err != nil || obj == nil || obj.IsDir() {
+			continue
+		}
+		sidecarName := stdpath.Base(sidecarPath)
+		if !overwrite && skipExisting && len(dstByName[sidecarName]) > 0 {
+			continue
+		}
 		var current task.TaskExtensionInfo
 		switch operation {
 		case "copy":
-			current, err = fs.Copy(c.Request.Context(), sidecarPath, dstDir, true)
+			current, err = fs.CopyWithOptions(c.Request.Context(), sidecarPath, dstDir, opts)
 		case "move":
-			current, err = fs.Move(c.Request.Context(), sidecarPath, dstDir, true)
+			current, err = fs.MoveWithOptions(c.Request.Context(), sidecarPath, dstDir, opts)
 		default:
 			return nil, fmt.Errorf("unsupported seed sidecar operation %q", operation)
 		}

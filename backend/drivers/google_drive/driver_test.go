@@ -3,6 +3,7 @@ package google_drive
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/drivers/base"
+	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/internal/stream"
 	"github.com/go-resty/resty/v2"
@@ -559,4 +561,103 @@ func TestLinkExportsGoogleDocuments(t *testing.T) {
 			}
 		})
 	}
+}
+
+type recordedRemoveReq struct {
+	method string
+	path   string
+	query  url.Values
+	body   map[string]any
+}
+
+type captureRemoveTransport struct {
+	reqs *[]recordedRemoveReq
+}
+
+func (c captureRemoveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	raw, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	var decoded map[string]any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return nil, err
+		}
+	}
+	*c.reqs = append(*c.reqs, recordedRemoveReq{
+		method: req.Method,
+		path:   req.URL.Path,
+		query:  req.URL.Query(),
+		body:   decoded,
+	})
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"ok","trashed":true}`)),
+	}, nil
+}
+
+func TestRemoveMovesToTrash(t *testing.T) {
+	old := base.RestyClient
+	defer func() { base.RestyClient = old }()
+
+	var reqs []recordedRemoveReq
+	base.RestyClient = resty.New().SetTransport(captureRemoveTransport{reqs: &reqs})
+	d := &GoogleDrive{AccessToken: "test-token"}
+
+	t.Run("regular_file", func(t *testing.T) {
+		reqs = nil
+		if err := d.Remove(context.Background(), &model.Object{ID: "file-123"}); err != nil {
+			t.Fatalf("Remove returned error: %v", err)
+		}
+		if len(reqs) != 1 {
+			t.Fatalf("expected 1 request, got %d", len(reqs))
+		}
+		got := reqs[0]
+		if got.method != http.MethodPatch {
+			t.Fatalf("expected PATCH to trash instead of DELETE, got %s", got.method)
+		}
+		if got.path != "/drive/v3/files/file-123" {
+			t.Fatalf("unexpected path: %s", got.path)
+		}
+		if got.query.Get("supportsAllDrives") != "true" || got.query.Get("includeItemsFromAllDrives") != "true" {
+			t.Fatalf("expected AllDrives query params true, got %v", got.query)
+		}
+		if len(got.body) != 1 || got.body["trashed"] != true {
+			t.Fatalf("expected JSON body {\"trashed\":true}, got %v", got.body)
+		}
+	})
+
+	t.Run("shortcut_trashes_shortcut_not_target", func(t *testing.T) {
+		reqs = nil
+		shortcutFile := File{
+			Id:       "shortcut-123",
+			Name:     "MyShortcut",
+			MimeType: "application/vnd.google-apps.shortcut",
+		}
+		shortcutFile.ShortcutDetails.TargetId = "original-target-456"
+		shortcutFile.ShortcutDetails.TargetMimeType = "application/vnd.google-apps.folder"
+		obj := fileToObj(shortcutFile)
+
+		if err := d.Remove(context.Background(), obj); err != nil {
+			t.Fatalf("Remove shortcut returned error: %v", err)
+		}
+		if len(reqs) != 1 || reqs[0].path != "/drive/v3/files/shortcut-123" {
+			t.Fatalf("expected shortcut's own ID to be trashed, got reqs=%+v", reqs)
+		}
+	})
+
+	t.Run("nil_or_empty_id", func(t *testing.T) {
+		reqs = nil
+		if err := d.Remove(context.Background(), nil); !errs.IsObjectNotFound(err) {
+			t.Fatalf("expected ObjectNotFound for nil obj, got %v", err)
+		}
+		if err := d.Remove(context.Background(), &model.Object{}); !errs.IsObjectNotFound(err) {
+			t.Fatalf("expected ObjectNotFound for empty ID obj, got %v", err)
+		}
+		if len(reqs) != 0 {
+			t.Fatalf("expected no HTTP calls on invalid object, got %d", len(reqs))
+		}
+	})
 }

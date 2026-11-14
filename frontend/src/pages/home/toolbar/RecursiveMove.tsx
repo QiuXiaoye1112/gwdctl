@@ -102,9 +102,15 @@ export const RecursiveMove = () => {
           const cp = conflictPolicy()
           onClose()
           const resp = await ok(src, dst, cp)
-          bus.emit("tool", "tasks_refresh")
           handleRespWithNotifySuccess(resp, () => {
-            refresh()
+            const taskIds =
+              resp.data?.tasks?.map((task) => task.id).filter(Boolean) ?? []
+            if (taskIds.length > 0) {
+              bus.emit("track_tasks", { type: "move", ids: taskIds })
+            } else {
+              bus.emit("tool", "tasks_refresh")
+              refresh(false, true)
+            }
           })
         }}
       />

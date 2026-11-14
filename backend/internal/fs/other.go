@@ -20,15 +20,19 @@ func makeDir(ctx context.Context, path string) error {
 	return op.MakeDir(ctx, storage, actualPath)
 }
 
-func rename(ctx context.Context, srcPath, dstName string, skipHook ...bool) error {
+func renameWithOptions(ctx context.Context, srcPath, dstName string, opts TransferOptions) error {
 	storage, srcActualPath, err := op.GetStorageAndActualPath(srcPath)
 	if err != nil {
 		return errors.WithMessage(err, "failed get storage")
 	}
-	if utils.IsBool(skipHook...) {
+	if opts.SkipHook {
 		ctx = context.WithValue(ctx, conf.SkipHookKey, struct{}{})
 	}
-	return op.Rename(ctx, storage, srcActualPath, dstName)
+	return op.RenameWithOptions(ctx, storage, srcActualPath, dstName, op.TransferOptions{Overwrite: opts.Overwrite})
+}
+
+func rename(ctx context.Context, srcPath, dstName string, skipHook ...bool) error {
+	return renameWithOptions(ctx, srcPath, dstName, TransferOptions{SkipHook: utils.IsBool(skipHook...)})
 }
 
 func remove(ctx context.Context, path string) error {

@@ -19,6 +19,7 @@ import {
   SeedOperationRequest,
   SeedOperationResult,
   SeedParseResult,
+  TaskInfo,
 } from "~/types"
 import { r } from "."
 
@@ -82,6 +83,11 @@ export const fsRename = (
   return r.post("/fs/rename", { path, name, overwrite, follow_seed })
 }
 
+type TransferTasksResp = PResp<{
+  message?: string
+  tasks?: TaskInfo[]
+}>
+
 export const fsMove = (
   src_dir: string,
   dst_dir: string,
@@ -89,7 +95,7 @@ export const fsMove = (
   overwrite: boolean,
   skip_existing: boolean,
   follow_seed = false,
-): PEmptyResp => {
+): TransferTasksResp => {
   return r.post("/fs/move", {
     src_dir,
     dst_dir,
@@ -103,8 +109,8 @@ export const fsMove = (
 export const fsRecursiveMove = (
   src_dir: string,
   dst_dir: string,
-  conflict_policy: boolean,
-): PEmptyResp => {
+  conflict_policy: string,
+): TransferTasksResp => {
   return r.post("/fs/recursive_move", { src_dir, dst_dir, conflict_policy })
 }
 
@@ -116,7 +122,7 @@ export const fsCopy = (
   skip_existing: boolean,
   merge: boolean,
   follow_seed = false,
-): PEmptyResp => {
+): TransferTasksResp => {
   return r.post("/fs/copy", {
     src_dir,
     dst_dir,

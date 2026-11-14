@@ -167,10 +167,14 @@ const (
 )
 
 func newDirectoryCache(objs []model.Obj) *directoryCache {
+	// Keep internal slice isolated from caller-owned slices (e.g. op.list return values)
+	// so RemoveObject/UpdateObject mutations never corrupt ongoing iterations.
+	objsCopy := make([]model.Obj, len(objs))
+	copy(objsCopy, objs)
 	sorted := make([]model.Obj, len(objs))
 	copy(sorted, objs)
 	return &directoryCache{
-		objs:   objs,
+		objs:   objsCopy,
 		sorted: sorted,
 	}
 }
@@ -187,6 +191,25 @@ func (dc *directoryCache) RemoveObject(name string) {
 	}
 }
 
+// RemoveObjectsByName deletes all entries matching name so duplicate remnants never linger in cache.
+func (dc *directoryCache) RemoveObjectsByName(name string) {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+	filtered := make([]model.Obj, 0, len(dc.objs))
+	removed := false
+	for _, obj := range dc.objs {
+		if obj.GetName() == name {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, obj)
+	}
+	dc.objs = filtered
+	if removed {
+		dc.dirtyFlags |= dirtyRemove
+	}
+}
+
 func (dc *directoryCache) UpdateObject(oldName string, newObj model.Obj) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
@@ -200,6 +223,22 @@ func (dc *directoryCache) UpdateObject(oldName string, newObj model.Obj) {
 		}
 	}
 	dc.objs = append(dc.objs, newObj)
+	dc.dirtyFlags |= dirtyUpdate
+}
+
+// ReplaceObject replaces all entries matching name with a single newObj entry.
+func (dc *directoryCache) ReplaceObject(name string, newObj model.Obj) {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+	filtered := make([]model.Obj, 0, len(dc.objs)+1)
+	for _, obj := range dc.objs {
+		if obj.GetName() == name {
+			continue
+		}
+		filtered = append(filtered, obj)
+	}
+	filtered = append(filtered, newObj)
+	dc.objs = filtered
 	dc.dirtyFlags |= dirtyUpdate
 }
 

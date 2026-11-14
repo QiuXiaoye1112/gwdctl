@@ -60,7 +60,7 @@ export const Delete = () => {
               onClose()
               const resp = await ok(dir, names, false)
               handleRespWithNotifySuccess(resp, () => {
-                refresh()
+                refresh(false, true)
               })
             }}
           >

@@ -159,8 +159,19 @@ func (d *GoogleDrive) Copy(ctx context.Context, srcObj, dstDir model.Obj) error 
 }
 
 func (d *GoogleDrive) Remove(ctx context.Context, obj model.Obj) error {
-	url := "https://www.googleapis.com/drive/v3/files/" + obj.GetID()
-	_, err := d.request(url, http.MethodDelete, nil, nil)
+	if obj == nil || obj.GetID() == "" {
+		return errs.ObjectNotFound
+	}
+	data := base.Json{
+		"trashed": true,
+	}
+	apiURL := "https://www.googleapis.com/drive/v3/files/" + url.PathEscape(obj.GetID())
+	_, err := d.request(apiURL, http.MethodPatch, func(req *resty.Request) {
+		if ctx != nil {
+			req.SetContext(ctx)
+		}
+		req.SetBody(data)
+	}, nil)
 	return err
 }
 

@@ -79,11 +79,14 @@
     "open_with": "Open with ...",
     "rename": "Rename",
     "input_new_name": "Input new name",
+    "rename_overwrite_title": "Confirm Overwrite",
+    "rename_overwrite_tips": "An item named \"{{name}}\" already exists in the current folder. Do you want to overwrite it? (The existing item will be moved to Google Drive Trash)",
+    "rename_overwrite_confirm": "Overwrite",
     "move": "Move",
     "copy": "Copy",
     "choose_dst_folder": "Select destination folder",
     "delete": "Delete",
-    "delete-tips": "Are you sure to delete the selected object?",
+    "delete-tips": "Are you sure to move the selected object to Google Drive Trash?",
     "follow_seed": "Follow transfer seed sidecars",
     "decompress": "Decompress",
     "decompress-pass": "Extraction password: ",
@@ -164,7 +167,7 @@
     "recursive_move": "Recursive Move",
     "recursive_move_directory-tips": "Are you sure you want to move all files in the current folder and its subfolders to the specified folder?",
     "remove_empty_directory": "Remove Empty Folder",
-    "remove_empty_directory-tips": "Are you sure to delete all its empty subfolders?"
+    "remove_empty_directory-tips": "Are you sure to move all its empty subfolders to Google Drive Trash?"
   },
   "transfer_seed": {
     "generate_title": "Generate transfer seed",

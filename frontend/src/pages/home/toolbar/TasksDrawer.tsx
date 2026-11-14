@@ -77,6 +77,30 @@ export const TasksDrawer = () => {
   const [loading, setLoading] = createSignal(false)
   const [cancelingId, setCancelingId] = createSignal<string>("")
   let prevBackendCount = 0
+  let fetchingTasks = false
+  let refetchQueued = false
+  const trackedTaskIds: Record<"copy" | "move", Set<string>> = {
+    copy: new Set(),
+    move: new Set(),
+  }
+
+  const notifyFailedTrackedTasks = async (
+    taskType: "copy" | "move",
+    finishedIds: Set<string>,
+  ) => {
+    try {
+      const doneRes = (await r.get(`/task/${taskType}/done`)) as Resp<TaskInfo[]>
+      if (doneRes.code !== 200 || !Array.isArray(doneRes.data)) return
+      for (const item of doneRes.data) {
+        if (!finishedIds.has(item.id) || item.state !== 7) continue
+        const label = formatTaskName(item.name)
+        const detail = item.error || item.status || "Task failed"
+        notify.error(label ? `${label}: ${detail}` : detail)
+      }
+    } catch {
+      // ignore notification lookup failure
+    }
+  }
 
   const activeUploads = () =>
     uploadFiles.uploads.filter(
@@ -94,14 +118,23 @@ export const TasksDrawer = () => {
       setTasks([])
       return
     }
+    if (fetchingTasks) {
+      refetchQueued = true
+      return
+    }
 
+    fetchingTasks = true
     if (showLoading) setLoading(true)
     try {
+      const succeededCategories = new Set<string>()
+      const runningIdsByType: Record<string, Set<string>> = {}
       const results = await Promise.all(
         TASK_CATEGORIES.map(async (cat) => {
           try {
             const res = (await r.get(`/task/${cat.type}/undone`)) as Resp<TaskInfo[]>
             if (res.code === 200 && Array.isArray(res.data)) {
+              succeededCategories.add(cat.type)
+              runningIdsByType[cat.type] = new Set(res.data.map((item) => item.id))
               return res.data.map((item: TaskInfo) => ({
                 ...item,
                 taskType: cat.type,
@@ -116,13 +149,40 @@ export const TasksDrawer = () => {
         })
       )
       const allRunning = results.flat()
-      if (prevBackendCount > 0 && allRunning.length < prevBackendCount) {
+      let shouldRefresh = prevBackendCount > 0 && allRunning.length < prevBackendCount
+
+      for (const trackedType of ["copy", "move"] as const) {
+        if (!succeededCategories.has(trackedType) || trackedTaskIds[trackedType].size === 0) {
+          continue
+        }
+        const stillRunning = runningIdsByType[trackedType]
+        const finishedIds = new Set<string>()
+        for (const id of trackedTaskIds[trackedType]) {
+          if (!stillRunning.has(id)) {
+            finishedIds.add(id)
+          }
+        }
+        if (finishedIds.size > 0) {
+          for (const id of finishedIds) {
+            trackedTaskIds[trackedType].delete(id)
+          }
+          shouldRefresh = true
+          void notifyFailedTrackedTasks(trackedType, finishedIds)
+        }
+      }
+
+      if (shouldRefresh) {
         refresh(false, true)
       }
       prevBackendCount = allRunning.length
       setTasks(allRunning)
     } finally {
+      fetchingTasks = false
       if (showLoading) setLoading(false)
+      if (refetchQueued) {
+        refetchQueued = false
+        void fetchRunningTasks(false)
+      }
     }
   }
 
@@ -151,9 +211,25 @@ export const TasksDrawer = () => {
       fetchRunningTasks(false)
     }
   }
+  const trackTasksHandler = ({
+    type,
+    ids,
+  }: {
+    type: "copy" | "move"
+    ids: string[]
+  }) => {
+    for (const id of ids) {
+      if (id) {
+        trackedTaskIds[type].add(id)
+      }
+    }
+    void fetchRunningTasks(false)
+  }
   bus.on("tool", handler)
+  bus.on("track_tasks", trackTasksHandler)
   onCleanup(() => {
     bus.off("tool", handler)
+    bus.off("track_tasks", trackTasksHandler)
   })
 
   // Polling interval

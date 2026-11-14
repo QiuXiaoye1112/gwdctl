@@ -6,6 +6,7 @@ import (
 	stdpath "path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
@@ -313,6 +314,173 @@ func Other(ctx context.Context, storage driver.Driver, args model.FsOtherArgs) (
 	})
 }
 
+// TransferOptions controls conflict resolution during same-storage or fallback transfers.
+type TransferOptions struct {
+	Overwrite bool
+}
+
+type keyedLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type keyedLockMap struct {
+	mu      sync.Mutex
+	entries map[string]*keyedLockEntry
+}
+
+func newKeyedLockMap() *keyedLockMap {
+	return &keyedLockMap{entries: make(map[string]*keyedLockEntry)}
+}
+
+// Lock serializes concurrent operations targeting the same key without holding nested locks.
+func (m *keyedLockMap) Lock(key string) func() {
+	m.mu.Lock()
+	entry, ok := m.entries[key]
+	if !ok {
+		entry = &keyedLockEntry{}
+		m.entries[key] = entry
+	}
+	entry.refs++
+	m.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		m.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(m.entries, key)
+		}
+		m.mu.Unlock()
+	}
+}
+
+var transferLocks = newKeyedLockMap()
+
+// ListExistingByName queries dirPath directly (bypassing directory cache) for objects matching name.
+func ListExistingByName(ctx context.Context, storage driver.Driver, dirPath, name string) ([]model.Obj, error) {
+	objs, err := list(ctx, storage, dirPath, model.ListArgs{Refresh: true, SkipHook: true}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var matches []model.Obj
+	for _, obj := range objs {
+		if obj.GetName() == name {
+			matches = append(matches, obj)
+		}
+	}
+	return matches, nil
+}
+
+// ValidateTransferConflicts filters self-references and checks overwrite and type compatibility rules.
+func ValidateTransferConflicts(srcIsDir bool, srcID string, conflicts []model.Obj, opts TransferOptions) ([]model.Obj, error) {
+	var realConflicts []model.Obj
+	for _, c := range conflicts {
+		if srcID != "" && c.GetID() == srcID {
+			continue
+		}
+		realConflicts = append(realConflicts, c)
+	}
+	if len(realConflicts) == 0 {
+		return nil, nil
+	}
+	if !opts.Overwrite {
+		return realConflicts, errors.WithStack(errs.ObjectAlreadyExists)
+	}
+	for _, c := range realConflicts {
+		if c.IsDir() != srcIsDir {
+			if c.IsDir() {
+				return nil, errors.New("cannot overwrite folder with file")
+			}
+			return nil, errors.New("cannot overwrite file with folder")
+		}
+	}
+	return realConflicts, nil
+}
+
+func getFreshOnMiss(ctx context.Context, storage driver.Driver, path string, excludeTemp bool) (model.Obj, error) {
+	path = utils.FixAndCleanPath(path)
+	if path == "/" {
+		return Get(ctx, storage, path, excludeTemp)
+	}
+	parentPath, name := stdpath.Split(path)
+	_, parentCached := Cache.dirCache.Get(Key(storage, parentPath))
+	obj, err := Get(ctx, storage, path, excludeTemp)
+	if err == nil || !errs.IsObjectNotFound(err) || !parentCached {
+		return obj, err
+	}
+	matches, listErr := ListExistingByName(ctx, storage, parentPath, name)
+	if listErr != nil {
+		return nil, listErr
+	}
+	if len(matches) == 0 {
+		return nil, errors.WithStack(errs.ObjectNotFound)
+	}
+	if excludeTemp && model.ObjHasMask(matches[0], model.Temp) {
+		return nil, errors.WithStack(errs.ObjectNotFound)
+	}
+	return matches[0], nil
+}
+
+func getUnwrapFreshOnMiss(ctx context.Context, storage driver.Driver, path string) (model.Obj, error) {
+	obj, err := getFreshOnMiss(ctx, storage, path, true)
+	if err != nil {
+		return nil, err
+	}
+	return model.UnwrapObjName(obj), nil
+}
+
+func removeConflictsByID(ctx context.Context, storage driver.Driver, dstDirPath string, conflicts []model.Obj, excludeIDs ...string) error {
+	if len(conflicts) == 0 {
+		return nil
+	}
+	remover, ok := storage.(driver.Remove)
+	if !ok {
+		return errs.NotImplement
+	}
+	skipIDs := make(map[string]struct{}, len(excludeIDs))
+	for _, id := range excludeIDs {
+		if id != "" {
+			skipIDs[id] = struct{}{}
+		}
+	}
+	dstKey := Key(storage, dstDirPath)
+	var firstErr error
+	for _, conflict := range conflicts {
+		id := conflict.GetID()
+		if id != "" {
+			if _, skip := skipIDs[id]; skip {
+				continue
+			}
+		}
+		if err := remover.Remove(ctx, model.UnwrapObjName(conflict)); err != nil {
+			if !errs.IsObjectNotFound(err) && firstErr == nil {
+				firstErr = errors.WithStack(err)
+			}
+			if !errs.IsObjectNotFound(err) {
+				continue
+			}
+		}
+		if !conflict.IsDir() {
+			Cache.linkCache.DeleteKey(stdpath.Join(dstKey, conflict.GetName()))
+		} else {
+			Cache.deleteDirectoryTree(stdpath.Join(dstKey, conflict.GetName()))
+		}
+	}
+	if firstErr != nil {
+		Cache.DeleteDirectory(storage, dstDirPath)
+	}
+	return firstErr
+}
+
+func objIDOrEmpty(obj model.Obj) string {
+	if obj == nil {
+		return ""
+	}
+	return obj.GetID()
+}
+
 var mkdirG singleflight.Group[any]
 
 func MakeDir(ctx context.Context, storage driver.Driver, path string) error {
@@ -322,6 +490,8 @@ func MakeDir(ctx context.Context, storage driver.Driver, path string) error {
 	path = utils.FixAndCleanPath(path)
 	key := Key(storage, path)
 	_, err, _ := mkdirG.Do(key, func() (any, error) {
+		parentPath, dirName := stdpath.Split(path)
+		_, parentCachedBefore := Cache.dirCache.Get(Key(storage, parentPath))
 		// check if dir exists
 		f, err := Get(ctx, storage, path)
 		if err == nil {
@@ -333,11 +503,26 @@ func MakeDir(ctx context.Context, storage driver.Driver, path string) error {
 		if !errs.IsObjectNotFound(err) {
 			return nil, errors.WithMessage(err, "failed to check if dir exists")
 		}
-		parentPath, dirName := stdpath.Split(path)
+		// Refresh once when parent was served from the short dirCache so recent external folders are not duplicated.
+		if parentCachedBefore && path != "/" {
+			existing, listErr := ListExistingByName(ctx, storage, parentPath, dirName)
+			if listErr != nil {
+				if !errs.IsObjectNotFound(listErr) {
+					return nil, errors.WithMessage(listErr, "failed to check if dir exists")
+				}
+			} else if len(existing) > 0 {
+				for _, e := range existing {
+					if e.IsDir() {
+						return nil, nil
+					}
+				}
+				return nil, errors.New("file exists")
+			}
+		}
 		if err = MakeDir(ctx, storage, parentPath); err != nil {
 			return nil, errors.WithMessagef(err, "failed to make parent dir [%s]", parentPath)
 		}
-		parentDir, err := GetUnwrap(ctx, storage, parentPath)
+		parentDir, err := getUnwrapFreshOnMiss(ctx, storage, parentPath)
 		// this should not happen
 		if err != nil {
 			return nil, errors.WithMessagef(err, "failed to get parent dir [%s]", parentPath)
@@ -383,6 +568,11 @@ func MakeDir(ctx context.Context, storage driver.Driver, path string) error {
 }
 
 func Move(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string) error {
+	return MoveWithOptions(ctx, storage, srcPath, dstDirPath, TransferOptions{})
+}
+
+// MoveWithOptions moves srcPath into dstDirPath while enforcing same-name conflict rules.
+func MoveWithOptions(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string, opts TransferOptions) error {
 	if storage.Config().CheckStatus && storage.GetStorage().Status != WORK {
 		return errors.WithMessagef(errs.StorageNotInit, "storage status: %s", storage.GetStorage().Status)
 	}
@@ -395,7 +585,16 @@ func Move(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string
 	if dstDirPath == srcDirPath {
 		return errors.New("move in place")
 	}
-	srcRawObj, err := Get(ctx, storage, srcPath, true)
+	if utils.IsSubPath(srcPath, dstDirPath) {
+		return errors.New("cannot move directory into itself")
+	}
+	switch storage.(type) {
+	case driver.MoveResult, driver.Move:
+	default:
+		return errs.NotImplement
+	}
+
+	srcRawObj, err := getFreshOnMiss(ctx, storage, srcPath, true)
 	if err != nil {
 		return errors.WithMessage(err, "failed to get src object")
 	}
@@ -403,13 +602,42 @@ func Move(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string
 		return errors.WithStack(errs.PermissionDenied)
 	}
 	srcObj := model.UnwrapObjName(srcRawObj)
-	dstDir, err := GetUnwrap(ctx, storage, dstDirPath)
+	dstDir, err := getUnwrapFreshOnMiss(ctx, storage, dstDirPath)
 	if err != nil {
 		return errors.WithMessage(err, "failed to get dst dir")
+	}
+	if !dstDir.IsDir() {
+		return errs.NotFolder
 	}
 	if model.ObjHasMask(dstDir, model.NoWrite) {
 		return errors.WithStack(errs.PermissionDenied)
 	}
+
+	dstPath := stdpath.Join(dstDirPath, srcRawObj.GetName())
+	unlock := transferLocks.Lock(Key(storage, dstPath))
+
+	rawConflicts, err := ListExistingByName(ctx, storage, dstDirPath, srcRawObj.GetName())
+	if err != nil {
+		unlock()
+		return errors.WithMessage(err, "failed to check dst conflicts")
+	}
+	conflicts, err := ValidateTransferConflicts(srcObj.IsDir(), srcObj.GetID(), rawConflicts, opts)
+	if err != nil {
+		unlock()
+		return err
+	}
+	if len(conflicts) > 0 {
+		if _, ok := storage.(driver.Remove); !ok {
+			unlock()
+			return errs.NotImplement
+		}
+		if srcObj.IsDir() {
+			// Release outer directory lock before recursing so child transfers acquire leaf locks cleanly.
+			unlock()
+			return mergeMoveDir(ctx, storage, srcPath, dstPath, opts)
+		}
+	}
+	defer unlock()
 
 	var newObj model.Obj
 	switch s := storage.(type) {
@@ -437,13 +665,18 @@ func Move(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string
 			}
 			cache.RemoveObject(srcRawObj.GetName())
 		}
+	}
+	if removeErr := removeConflictsByID(ctx, storage, dstDirPath, conflicts, srcObj.GetID(), objIDOrEmpty(newObj)); removeErr != nil {
+		return removeErr
+	}
+	if !storage.Config().NoCache {
 		if cache, exist := Cache.dirCache.Get(dstKey); exist {
 			if newObj == nil {
 				newObj = &model.ObjWrapMask{Obj: srcRawObj, Mask: model.Temp}
 			} else {
 				newObj = wrapObjName(storage, newObj)
 			}
-			cache.UpdateObject(srcRawObj.GetName(), newObj)
+			cache.ReplaceObject(srcRawObj.GetName(), newObj)
 		}
 	}
 
@@ -458,7 +691,92 @@ func Move(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string
 	return nil
 }
 
+// mergeMoveDir moves contents of srcDirPath into existing dstDirPath when overwrite is enabled,
+// preserving non-conflicting items in dstDirPath and removing srcDirPath only after it empties.
+func mergeMoveDir(ctx context.Context, storage driver.Driver, srcDirPath, dstDirPath string, opts TransferOptions) error {
+	srcObjs, err := list(ctx, storage, srcDirPath, model.ListArgs{Refresh: true, SkipHook: true}, nil)
+	if err != nil {
+		return errors.WithMessagef(err, "failed to list src dir [%s]", srcDirPath)
+	}
+	dstObjs, err := list(ctx, storage, dstDirPath, model.ListArgs{Refresh: true, SkipHook: true}, nil)
+	if err != nil {
+		return errors.WithMessagef(err, "failed to list dst dir [%s]", dstDirPath)
+	}
+	dstByName := make(map[string][]model.Obj, len(dstObjs))
+	for _, obj := range dstObjs {
+		dstByName[obj.GetName()] = append(dstByName[obj.GetName()], obj)
+	}
+	for _, srcChild := range srcObjs {
+		matches := dstByName[srcChild.GetName()]
+		if _, err := ValidateTransferConflicts(srcChild.IsDir(), srcChild.GetID(), matches, opts); err != nil {
+			return err
+		}
+	}
+	for _, srcChild := range srcObjs {
+		childSrcPath := stdpath.Join(srcDirPath, srcChild.GetName())
+		matches := dstByName[srcChild.GetName()]
+		if len(matches) == 0 {
+			if err := MoveWithOptions(ctx, storage, childSrcPath, dstDirPath, opts); err != nil {
+				return err
+			}
+			continue
+		}
+		if srcChild.IsDir() {
+			if err := mergeMoveDir(ctx, storage, childSrcPath, stdpath.Join(dstDirPath, srcChild.GetName()), opts); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := MoveWithOptions(ctx, storage, childSrcPath, dstDirPath, opts); err != nil {
+			return err
+		}
+	}
+	remaining, err := list(ctx, storage, srcDirPath, model.ListArgs{Refresh: true, SkipHook: true}, nil)
+	if err != nil {
+		return errors.WithMessagef(err, "failed to verify emptied src dir [%s]", srcDirPath)
+	}
+	if len(remaining) > 0 {
+		return errors.Errorf("source directory [%s] is not empty after merge move", srcDirPath)
+	}
+	return Remove(ctx, storage, srcDirPath)
+}
+
+func selectOldConflictsForPrune(keepID string, conflicts, afterObjs []model.Obj) []model.Obj {
+	if keepID != "" {
+		for _, obj := range afterObjs {
+			if obj.GetID() == keepID {
+				return conflicts
+			}
+		}
+	}
+	preIDs := make(map[string]struct{}, len(conflicts))
+	for _, c := range conflicts {
+		if id := c.GetID(); id != "" {
+			preIDs[id] = struct{}{}
+		}
+	}
+	toDelete := make([]model.Obj, 0, len(afterObjs)-1)
+	kept := false
+	for i := len(afterObjs) - 1; i >= 0; i-- {
+		obj := afterObjs[i]
+		_, isOld := preIDs[obj.GetID()]
+		if !kept && !isOld {
+			kept = true
+			continue
+		}
+		toDelete = append(toDelete, obj)
+	}
+	if !kept && len(toDelete) > 0 {
+		toDelete = toDelete[1:]
+	}
+	return toDelete
+}
+
 func Rename(ctx context.Context, storage driver.Driver, srcPath, dstName string) error {
+	return RenameWithOptions(ctx, storage, srcPath, dstName, TransferOptions{})
+}
+
+func RenameWithOptions(ctx context.Context, storage driver.Driver, srcPath, dstName string, opts TransferOptions) error {
 	if storage.Config().CheckStatus && storage.GetStorage().Status != WORK {
 		return errors.WithMessagef(errs.StorageNotInit, "storage status: %s", storage.GetStorage().Status)
 	}
@@ -466,7 +784,7 @@ func Rename(ctx context.Context, storage driver.Driver, srcPath, dstName string)
 	if utils.PathEqual(srcPath, "/") {
 		return errors.New("rename root folder is not allowed")
 	}
-	srcRawObj, err := Get(ctx, storage, srcPath, true)
+	srcRawObj, err := getFreshOnMiss(ctx, storage, srcPath, true)
 	if err != nil {
 		return errors.WithMessage(err, "failed to get src object")
 	}
@@ -475,6 +793,35 @@ func Rename(ctx context.Context, storage driver.Driver, srcPath, dstName string)
 	}
 	oldName := srcRawObj.GetName()
 	srcObj := model.UnwrapObjName(srcRawObj)
+	dirPath := utils.FixAndCleanPath(stdpath.Dir(srcPath))
+	dstPath := stdpath.Join(dirPath, dstName)
+
+	unlock := transferLocks.Lock(Key(storage, dstPath))
+	defer unlock()
+
+	var conflicts []model.Obj
+	if oldName != dstName {
+		rawConflicts, listErr := ListExistingByName(ctx, storage, dirPath, dstName)
+		if listErr != nil {
+			return listErr
+		}
+		srcID := srcRawObj.GetID()
+		for _, c := range rawConflicts {
+			if srcID != "" && c.GetID() == srcID {
+				continue
+			}
+			if c.IsDir() != srcRawObj.IsDir() {
+				if c.IsDir() {
+					return errors.New("cannot overwrite folder with file")
+				}
+				return errors.New("cannot overwrite file with folder")
+			}
+		}
+		conflicts, err = ValidateTransferConflicts(srcRawObj.IsDir(), srcID, rawConflicts, opts)
+		if err != nil {
+			return err
+		}
+	}
 
 	var newObj model.Obj
 	switch s := storage.(type) {
@@ -489,47 +836,98 @@ func Rename(ctx context.Context, storage driver.Driver, srcPath, dstName string)
 		return errors.WithStack(err)
 	}
 
-	dirKey := Key(storage, stdpath.Dir(srcPath))
+	dirKey := Key(storage, dirPath)
 	if !srcRawObj.IsDir() {
 		Cache.linkCache.DeleteKey(stdpath.Join(dirKey, oldName))
 		Cache.linkCache.DeleteKey(stdpath.Join(dirKey, dstName))
 	}
+	if !storage.Config().NoCache && srcRawObj.IsDir() {
+		Cache.deleteDirectoryTree(stdpath.Join(dirKey, oldName))
+		if len(conflicts) > 0 && oldName != dstName {
+			Cache.deleteDirectoryTree(stdpath.Join(dirKey, dstName))
+		}
+	}
+
+	if len(conflicts) > 0 {
+		newID := objIDOrEmpty(newObj)
+		if newID != "" {
+			if removeErr := removeConflictsByID(ctx, storage, dirPath, conflicts, newID); removeErr != nil {
+				if !storage.Config().NoCache {
+					Cache.DeleteDirectory(storage, dirPath)
+				}
+				return removeErr
+			}
+		} else {
+			// Driver did not return a post-rename ID; inspect live entries so
+			// path-based in-place overwrites (<= 1 left) are preserved while
+			// ID-keyed drivers like Google Drive (2+ left) remove old conflicts.
+			afterObjs, afterErr := ListExistingByName(ctx, storage, dirPath, dstName)
+			if afterErr != nil {
+				if !storage.Config().NoCache {
+					Cache.DeleteDirectory(storage, dirPath)
+				}
+				return afterErr
+			}
+			if len(afterObjs) > 1 {
+				toDelete := selectOldConflictsForPrune(srcObj.GetID(), conflicts, afterObjs)
+				if removeErr := removeConflictsByID(ctx, storage, dirPath, toDelete, srcObj.GetID()); removeErr != nil {
+					if !storage.Config().NoCache {
+						Cache.DeleteDirectory(storage, dirPath)
+					}
+					return removeErr
+				}
+			}
+		}
+	}
+
 	if !storage.Config().NoCache {
 		if cache, exist := Cache.dirCache.Get(dirKey); exist {
-			if srcRawObj.IsDir() {
-				Cache.deleteDirectoryTree(stdpath.Join(dirKey, oldName))
-			}
 			if newObj == nil {
 				newObj = &model.ObjWrapMask{Obj: &model.ObjWrapName{Name: dstName, Obj: srcObj}, Mask: model.Temp}
 			}
 			newObj = wrapObjName(storage, newObj)
-			cache.UpdateObject(oldName, newObj)
+			if oldName != dstName {
+				cache.RemoveObjectsByName(oldName)
+				cache.ReplaceObject(dstName, newObj)
+			} else {
+				cache.UpdateObject(oldName, newObj)
+			}
 		}
 	}
 
 	if ctx.Value(conf.SkipHookKey) != nil || !needHandleObjsUpdateHook() {
 		return nil
 	}
-	dstDirPath := stdpath.Dir(srcPath)
 	if !srcObj.IsDir() {
-		go objsUpdateHook(context.WithoutCancel(ctx), storage, dstDirPath, false)
+		go objsUpdateHook(context.WithoutCancel(ctx), storage, dirPath, false)
 	} else {
-		go objsUpdateHook(context.WithoutCancel(ctx), storage, stdpath.Join(dstDirPath, srcObj.GetName()), true)
+		go objsUpdateHook(context.WithoutCancel(ctx), storage, stdpath.Join(dirPath, dstName), true)
 	}
 	return nil
 }
 
 // Copy Just copy file[s] in a storage
 func Copy(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string) error {
+	return CopyWithOptions(ctx, storage, srcPath, dstDirPath, TransferOptions{})
+}
+
+// CopyWithOptions copies srcPath into dstDirPath while enforcing same-name conflict rules.
+func CopyWithOptions(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string, opts TransferOptions) error {
 	if storage.Config().CheckStatus && storage.GetStorage().Status != WORK {
 		return errors.WithMessagef(errs.StorageNotInit, "storage status: %s", storage.GetStorage().Status)
 	}
 	srcPath = utils.FixAndCleanPath(srcPath)
 	dstDirPath = utils.FixAndCleanPath(dstDirPath)
 	if dstDirPath == stdpath.Dir(srcPath) {
-		return errors.WithStack(errs.NotImplement)
+		return errors.New("copy in place is not supported")
 	}
-	srcRawObj, err := Get(ctx, storage, srcPath, true)
+	switch storage.(type) {
+	case driver.CopyResult, driver.Copy:
+	default:
+		return errs.NotImplement
+	}
+
+	srcRawObj, err := getFreshOnMiss(ctx, storage, srcPath, true)
 	if err != nil {
 		return errors.WithMessage(err, "failed to get src object")
 	}
@@ -537,12 +935,36 @@ func Copy(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string
 	// 	return errors.WithStack(errs.PermissionDenied)
 	// }
 	srcObj := model.UnwrapObjName(srcRawObj)
-	dstDir, err := GetUnwrap(ctx, storage, dstDirPath)
+	if srcObj.IsDir() {
+		return errs.NotSupport
+	}
+	dstDir, err := getUnwrapFreshOnMiss(ctx, storage, dstDirPath)
 	if err != nil {
 		return errors.WithMessage(err, "failed to get dst dir")
 	}
+	if !dstDir.IsDir() {
+		return errs.NotFolder
+	}
 	if model.ObjHasMask(dstDir, model.NoWrite) {
 		return errors.WithStack(errs.PermissionDenied)
+	}
+
+	dstPath := stdpath.Join(dstDirPath, srcRawObj.GetName())
+	unlock := transferLocks.Lock(Key(storage, dstPath))
+	defer unlock()
+
+	rawConflicts, err := ListExistingByName(ctx, storage, dstDirPath, srcRawObj.GetName())
+	if err != nil {
+		return errors.WithMessage(err, "failed to check dst conflicts")
+	}
+	conflicts, err := ValidateTransferConflicts(srcObj.IsDir(), "", rawConflicts, opts)
+	if err != nil {
+		return err
+	}
+	if len(conflicts) > 0 {
+		if _, ok := storage.(driver.Remove); !ok {
+			return errs.NotImplement
+		}
 	}
 
 	var newObj model.Obj
@@ -562,14 +984,16 @@ func Copy(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string
 	if !srcRawObj.IsDir() {
 		Cache.linkCache.DeleteKey(stdpath.Join(dstKey, srcRawObj.GetName()))
 	}
+	if removeErr := removeConflictsByID(ctx, storage, dstDirPath, conflicts, objIDOrEmpty(newObj)); removeErr != nil {
+		return removeErr
+	}
 	if !storage.Config().NoCache {
-		if cache, exist := Cache.dirCache.Get(dstKey); exist {
-			if newObj == nil {
-				newObj = &model.ObjWrapMask{Obj: srcRawObj, Mask: model.Temp}
-			} else {
-				newObj = wrapObjName(storage, newObj)
-			}
-			cache.UpdateObject(srcRawObj.GetName(), newObj)
+		if newObj == nil {
+			// Driver didn't return the newly created object (new ID on Google Drive), so invalidate dst dirCache
+			// rather than caching srcRawObj with the source file's ID.
+			Cache.DeleteDirectory(storage, dstDirPath)
+		} else if cache, exist := Cache.dirCache.Get(dstKey); exist {
+			cache.ReplaceObject(srcRawObj.GetName(), wrapObjName(storage, newObj))
 		}
 	}
 
@@ -592,7 +1016,7 @@ func Remove(ctx context.Context, storage driver.Driver, path string) error {
 	if utils.PathEqual(path, "/") {
 		return errors.New("delete root folder is not allowed")
 	}
-	rawObj, err := Get(ctx, storage, path, true)
+	rawObj, err := getFreshOnMiss(ctx, storage, path, true)
 	if err != nil {
 		// if object not found, it's ok
 		if errs.IsObjectNotFound(err) {
@@ -619,13 +1043,94 @@ func Remove(ctx context.Context, storage driver.Driver, path string) error {
 }
 
 func Put(ctx context.Context, storage driver.Driver, dstDirPath string, file model.FileStreamer, up driver.UpdateProgress) error {
+	_, err := putInternal(ctx, storage, dstDirPath, file, up)
+	return err
+}
+
+// PutWithOptions uploads file into dstDirPath while enforcing transfer conflict and overwrite semantics.
+func PutWithOptions(ctx context.Context, storage driver.Driver, dstDirPath string, file model.FileStreamer, up driver.UpdateProgress, opts TransferOptions) error {
+	dstDirPath = utils.FixAndCleanPath(dstDirPath)
+	dstPath := stdpath.Join(dstDirPath, file.GetName())
+	unlock := transferLocks.Lock(Key(storage, dstPath))
+	defer unlock()
+
+	var conflicts []model.Obj
+	rawConflicts, listErr := ListExistingByName(ctx, storage, dstDirPath, file.GetName())
+	if listErr != nil {
+		if !errs.IsObjectNotFound(listErr) {
+			_ = file.Close()
+			return errors.WithMessage(listErr, "failed to check dst conflicts")
+		}
+	} else {
+		var err error
+		conflicts, err = ValidateTransferConflicts(false, "", rawConflicts, opts)
+		if err != nil {
+			_ = file.Close()
+			return err
+		}
+	}
+
+	newObj, err := putInternal(ctx, storage, dstDirPath, file, up)
+	if err != nil {
+		return err
+	}
+	if len(conflicts) > 0 {
+		newID := objIDOrEmpty(newObj)
+		if newID != "" {
+			if removeErr := removeConflictsByID(ctx, storage, dstDirPath, conflicts, newID); removeErr != nil {
+				return removeErr
+			}
+		} else {
+			// Driver did not return a concrete object ID; only prune old duplicates when
+			// multiple entries exist so path-based in-place overwrites remain untouched.
+			afterObjs, afterErr := ListExistingByName(ctx, storage, dstDirPath, file.GetName())
+			if afterErr == nil && len(afterObjs) > 1 {
+				toDelete := make([]model.Obj, 0, len(afterObjs)-1)
+				preIDs := make(map[string]struct{}, len(conflicts))
+				for _, c := range conflicts {
+					if c.GetID() != "" {
+						preIDs[c.GetID()] = struct{}{}
+					}
+				}
+				kept := false
+				for i := len(afterObjs) - 1; i >= 0; i-- {
+					obj := afterObjs[i]
+					_, isOld := preIDs[obj.GetID()]
+					if !kept && !isOld {
+						kept = true
+						continue
+					}
+					toDelete = append(toDelete, obj)
+				}
+				if !kept && len(toDelete) > 0 {
+					toDelete = toDelete[1:]
+				}
+				if removeErr := removeConflictsByID(ctx, storage, dstDirPath, toDelete); removeErr != nil {
+					return removeErr
+				}
+			}
+		}
+		if !storage.Config().NoCache {
+			if newObj != nil {
+				if cache, exist := Cache.dirCache.Get(Key(storage, dstDirPath)); exist {
+					cache.ReplaceObject(newObj.GetName(), newObj)
+				}
+			} else {
+				Cache.DeleteDirectory(storage, dstDirPath)
+			}
+		}
+	}
+	return nil
+}
+
+func putInternal(ctx context.Context, storage driver.Driver, dstDirPath string, file model.FileStreamer, up driver.UpdateProgress) (model.Obj, error) {
 	defer func() {
 		if err := file.Close(); err != nil {
 			log.Errorf("failed to close file streamer, %v", err)
 		}
 	}()
 	if storage.Config().CheckStatus && storage.GetStorage().Status != WORK {
-		return errors.WithMessagef(errs.StorageNotInit, "storage status: %s", storage.GetStorage().Status)
+		return nil, errors.WithMessagef(errs.StorageNotInit, "storage status: %s", storage.GetStorage().Status)
 	}
 	// UrlTree PUT
 	if storage.Config().OnlyIndices {
@@ -643,13 +1148,13 @@ func Put(ctx context.Context, storage driver.Driver, dstDirPath string, file mod
 		if fi.GetSize() == 0 {
 			err = Remove(ctx, storage, dstPath)
 			if err != nil {
-				return errors.WithMessagef(err, "while uploading, failed remove existing file which size = 0")
+				return nil, errors.WithMessagef(err, "while uploading, failed remove existing file which size = 0")
 			}
 		} else if storage.Config().NoOverwriteUpload && ctx.Value(conf.SkipNoOverwriteKey) == nil {
 			// try to rename old obj
 			err = Rename(ctx, storage, dstPath, tempName)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		} else {
 			file.SetExist(fi)
@@ -657,15 +1162,15 @@ func Put(ctx context.Context, storage driver.Driver, dstDirPath string, file mod
 	}
 	err = MakeDir(ctx, storage, dstDirPath)
 	if err != nil && !errs.IsObjectAlreadyExists(err) {
-		return errors.WithMessagef(err, "failed to make dir [%s]", dstDirPath)
+		return nil, errors.WithMessagef(err, "failed to make dir [%s]", dstDirPath)
 	}
 	parentDir, err := GetUnwrap(ctx, storage, dstDirPath)
 	// this should not happen
 	if err != nil {
-		return errors.WithMessagef(err, "failed to get dir [%s]", dstDirPath)
+		return nil, errors.WithMessagef(err, "failed to get dir [%s]", dstDirPath)
 	}
 	if model.ObjHasMask(parentDir, model.NoWrite) {
-		return errors.WithStack(errs.PermissionDenied)
+		return nil, errors.WithStack(errs.PermissionDenied)
 	}
 	// if up is nil, set a default to prevent panic
 	if up == nil {
@@ -685,23 +1190,27 @@ func Put(ctx context.Context, storage driver.Driver, dstDirPath string, file mod
 	case driver.Put:
 		err = s.Put(ctx, parentDir, file, up)
 	default:
-		return errs.NotImplement
+		return nil, errs.NotImplement
 	}
+	var wrappedNewObj model.Obj
 	if err == nil {
 		Cache.linkCache.DeleteKey(Key(storage, dstPath))
+		if newObj != nil {
+			wrappedNewObj = wrapObjName(storage, newObj)
+		}
 		if !storage.Config().NoCache {
 			if cache, exist := Cache.dirCache.Get(Key(storage, dstDirPath)); exist {
-				if newObj == nil {
-					newObj = &model.Object{
+				cachedObj := wrappedNewObj
+				if cachedObj == nil {
+					cachedObj = wrapObjName(storage, &model.Object{
 						Name:     file.GetName(),
 						Size:     file.GetSize(),
 						Modified: file.ModTime(),
 						Ctime:    file.CreateTime(),
 						Mask:     model.Temp,
-					}
+					})
 				}
-				newObj = wrapObjName(storage, newObj)
-				cache.UpdateObject(newObj.GetName(), newObj)
+				cache.UpdateObject(cachedObj.GetName(), cachedObj)
 			}
 		}
 
@@ -722,7 +1231,7 @@ func Put(ctx context.Context, storage driver.Driver, dstDirPath string, file mod
 			err = Remove(ctx, storage, tempPath)
 		}
 	}
-	return errors.WithStack(err)
+	return wrappedNewObj, errors.WithStack(err)
 }
 
 func PutURL(ctx context.Context, storage driver.Driver, dstDirPath, dstName, url string) error {

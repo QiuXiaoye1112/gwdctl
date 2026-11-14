@@ -43,8 +43,9 @@ const (
 
 type FileTransferTask struct {
 	TaskData
-	TaskType taskType
-	groupID  string
+	TaskType  taskType
+	Overwrite bool `json:"overwrite,omitempty"`
+	groupID   string
 }
 
 func (t *FileTransferTask) GetName() string {
@@ -130,7 +131,19 @@ func namedCopyStageObjectPath(stageDirPath, srcPath, dstName string) string {
 	return stdpath.Join(stageDirPath, name)
 }
 
-func copyNamedInStorage(ctx context.Context, storage driver.Driver, srcPath, dstDirPath, dstName string) error {
+func copyNamedInStorage(ctx context.Context, storage driver.Driver, srcPath, dstDirPath, dstName string, overwrite bool) error {
+	targetName := dstName
+	if targetName == "" {
+		targetName = stdpath.Base(srcPath)
+	}
+	rawConflicts, err := op.ListExistingByName(ctx, storage, dstDirPath, targetName)
+	if err != nil {
+		return errors.WithMessage(err, "failed to check dst conflicts")
+	}
+	if _, err := op.ValidateTransferConflicts(false, "", rawConflicts, op.TransferOptions{Overwrite: overwrite}); err != nil {
+		return err
+	}
+
 	stageDirPath := stdpath.Join(dstDirPath, ".openlist-copy-"+uuid.NewString())
 	stageCtx := context.WithValue(ctx, conf.SkipHookKey, struct{}{})
 	if err := op.MakeDir(stageCtx, storage, stageDirPath); err != nil {
@@ -163,7 +176,7 @@ func copyNamedInStorage(ctx context.Context, storage driver.Driver, srcPath, dst
 	// Staging operations suppress hooks so intermediate paths stay invisible.
 	// The final move intentionally uses the caller context to publish the target
 	// and trigger the normal cache/update hooks exactly once.
-	if err := op.Move(ctx, storage, stageObjPath, dstDirPath); err != nil {
+	if err := op.MoveWithOptions(ctx, storage, stageObjPath, dstDirPath, op.TransferOptions{Overwrite: overwrite}); err != nil {
 		return errors.WithMessage(err, "failed move copied object from staging directory")
 	}
 	if err := removeStage(); err != nil {
@@ -173,7 +186,7 @@ func copyNamedInStorage(ctx context.Context, storage driver.Driver, srcPath, dst
 	return nil
 }
 
-func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, dstName string, skipHook ...bool) (task.TaskExtensionInfo, error) {
+func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, dstName string, opts TransferOptions) (task.TaskExtensionInfo, error) {
 	srcStorage, srcObjActualPath, err := op.GetStorageAndActualPath(srcObjPath)
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed get src storage")
@@ -194,7 +207,8 @@ func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, ds
 			SrcStorageMp:  srcStorage.GetStorage().MountPath,
 			DstStorageMp:  dstStorage.GetStorage().MountPath,
 		},
-		TaskType: taskType,
+		TaskType:  taskType,
+		Overwrite: opts.Overwrite,
 	}
 
 	t.groupID = stdpath.Join(t.DstStorageMp, t.DstActualPath)
@@ -236,9 +250,10 @@ func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, ds
 }
 
 func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransferTask) error) error {
+	transferOpts := op.TransferOptions{Overwrite: t.Overwrite}
 	if t.SrcStorage.GetStorage() == t.DstStorage.GetStorage() && t.TaskType == move {
 		t.Status = "moving in storage"
-		err := op.Move(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath)
+		err := op.MoveWithOptions(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath, transferOpts)
 		if !errors.Is(err, errs.NotImplement) && !errors.Is(err, errs.NotSupport) {
 			if err == nil {
 				t.SetProgress(100)
@@ -255,7 +270,7 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 
 	if srcObj.IsDir() {
 		t.Status = "src object is dir, listing objs"
-		objs, err := op.List(t.Ctx(), t.SrcStorage, t.SrcActualPath, model.ListArgs{})
+		objs, err := op.List(t.Ctx(), t.SrcStorage, t.SrcActualPath, model.ListArgs{Refresh: true})
 		if err != nil {
 			return errors.WithMessagef(err, "failed list src [%s] objs", t.SrcActualPath)
 		}
@@ -267,9 +282,10 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 		if err := op.MakeDir(t.Ctx(), t.DstStorage, dstActualPath); err != nil {
 			return errors.WithMessagef(err, "failed create dst dir [%s]", dstActualPath)
 		}
-		existedObjs := make(map[string]bool)
+		existedFiles := make(map[string]bool)
+		existedDirs := make(map[string]bool)
 		if t.TaskType == merge {
-			dstObjs, err := op.List(t.Ctx(), t.DstStorage, dstActualPath, model.ListArgs{})
+			dstObjs, err := op.List(t.Ctx(), t.DstStorage, dstActualPath, model.ListArgs{Refresh: true})
 			if err != nil && !errors.Is(err, errs.ObjectNotFound) {
 				// 目标文件夹不存在的情况不是错误，会在之后新建文件夹
 				// 这种情况显然不需要统计existedObjs，dstObjs保持为nil，下面这个for将不会执行
@@ -279,8 +295,10 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 				if err := t.Ctx().Err(); err != nil {
 					return err
 				}
-				if !obj.IsDir() {
-					existedObjs[obj.GetName()] = true
+				if obj.IsDir() {
+					existedDirs[obj.GetName()] = true
+				} else {
+					existedFiles[obj.GetName()] = true
 				}
 			}
 		}
@@ -290,13 +308,23 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 				return err
 			}
 
-			if t.TaskType == merge && !obj.IsDir() && existedObjs[obj.GetName()] {
-				// skip existed file
-				continue
+			if t.TaskType == merge {
+				if !obj.IsDir() {
+					if existedDirs[obj.GetName()] {
+						return errors.New("cannot overwrite folder with file")
+					}
+					if !t.Overwrite && existedFiles[obj.GetName()] {
+						// skip existed file
+						continue
+					}
+				} else if existedFiles[obj.GetName()] {
+					return errors.New("cannot overwrite file with folder")
+				}
 			}
 
 			err = f(&FileTransferTask{
-				TaskType: t.TaskType,
+				TaskType:  t.TaskType,
+				Overwrite: t.Overwrite,
 				TaskData: TaskData{
 					TaskExtension: task.TaskExtension{
 						Creator: t.Creator,
@@ -323,9 +351,9 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 		t.Status = "copying in storage"
 		var copyErr error
 		if t.DstName != "" && supportsNamedNativeCopy(t.SrcStorage) {
-			copyErr = copyNamedInStorage(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath, t.DstName)
+			copyErr = copyNamedInStorage(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath, t.DstName, t.Overwrite)
 		} else if t.DstName == "" {
-			copyErr = op.Copy(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath)
+			copyErr = op.CopyWithOptions(t.Ctx(), t.SrcStorage, t.SrcActualPath, t.DstActualPath, transferOpts)
 		} else {
 			copyErr = errs.NotSupport
 		}
@@ -335,6 +363,18 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 			}
 			return copyErr
 		}
+	}
+
+	targetName := srcObj.GetName()
+	if t.DstName != "" {
+		targetName = t.DstName
+	}
+	if rawConflicts, listErr := op.ListExistingByName(t.Ctx(), t.DstStorage, t.DstActualPath, targetName); listErr == nil {
+		if _, err := op.ValidateTransferConflicts(false, "", rawConflicts, transferOpts); err != nil {
+			return err
+		}
+	} else if !errs.IsObjectNotFound(listErr) {
+		return errors.WithMessage(listErr, "failed to check dst conflicts")
 	}
 
 	t.Status = "getting src object link"
@@ -357,7 +397,7 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 	}
 	t.SetTotalBytes(ss.GetSize())
 	t.Status = "uploading"
-	return op.Put(context.WithValue(t.Ctx(), conf.SkipHookKey, struct{}{}), t.DstStorage, t.DstActualPath, ss, t.SetProgress)
+	return op.PutWithOptions(context.WithValue(t.Ctx(), conf.SkipHookKey, struct{}{}), t.DstStorage, t.DstActualPath, ss, t.SetProgress, transferOpts)
 }
 
 var (

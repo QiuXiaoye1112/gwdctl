@@ -9,6 +9,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/fs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/internal/op"
+	"github.com/OpenListTeam/OpenList/v4/internal/task"
 	"github.com/OpenListTeam/OpenList/v4/pkg/generic"
 	"github.com/OpenListTeam/OpenList/v4/server/common"
 	"github.com/gin-gonic/gin"
@@ -65,20 +66,27 @@ func FsRecursiveMove(c *gin.Context) {
 		return
 	}
 
-	rootFiles, err := fs.List(c.Request.Context(), srcDir, &fs.ListArgs{})
+	switch req.ConflictPolicy {
+	case CANCEL, OVERWRITE, SKIP:
+	default:
+		common.ErrorStrResp(c, fmt.Sprintf("invalid conflict policy [%s]", req.ConflictPolicy), 400)
+		return
+	}
+
+	rootFiles, err := fs.List(c.Request.Context(), srcDir, &fs.ListArgs{Refresh: true})
 	if err != nil {
 		common.ErrorResp(c, err, 500)
 		return
 	}
 
-	var existingFileNames []string
+	dstFiles, err := fs.List(c.Request.Context(), dstDir, &fs.ListArgs{Refresh: true})
+	if err != nil {
+		common.ErrorResp(c, err, 500)
+		return
+	}
+	dstByName := indexObjsByName(dstFiles)
+	existingFileNames := make([]string, 0, len(dstFiles))
 	if req.ConflictPolicy != OVERWRITE {
-		dstFiles, err := fs.List(c.Request.Context(), dstDir, &fs.ListArgs{})
-		if err != nil {
-			common.ErrorResp(c, err, 500)
-			return
-		}
-		existingFileNames = make([]string, 0, len(dstFiles))
 		for _, dstFile := range dstFiles {
 			existingFileNames = append(existingFileNames, dstFile.GetName())
 		}
@@ -116,14 +124,19 @@ func FsRecursiveMove(c *gin.Context) {
 				continue
 			}
 
-			if slices.Contains(existingFileNames, movingFile.GetName()) {
+			if req.ConflictPolicy == OVERWRITE {
+				if hasDirObj(dstByName[movingFile.GetName()]) {
+					common.ErrorStrResp(c, fmt.Sprintf("cannot overwrite folder [%s] with file", movingFile.GetName()), 403)
+					return
+				}
+			} else if slices.Contains(existingFileNames, movingFile.GetName()) {
 				if req.ConflictPolicy == CANCEL {
 					common.ErrorStrResp(c, fmt.Sprintf("file [%s] exists", movingFile.GetName()), 403)
 					return
 				} else if req.ConflictPolicy == SKIP {
 					continue
 				}
-			} else if req.ConflictPolicy != OVERWRITE {
+			} else {
 				existingFileNames = append(existingFileNames, movingFile.GetName())
 			}
 			movingFileNames = append(movingFileNames, movingFileName)
@@ -133,9 +146,16 @@ func FsRecursiveMove(c *gin.Context) {
 	}
 
 	var count = 0
+	addedTasks := make([]task.TaskExtensionInfo, 0, len(movingFileNames))
 	for i, fileName := range movingFileNames {
 		// move
-		_, err := fs.Move(c.Request.Context(), fileName, dstDir, len(movingFileNames) > i+1)
+		t, err := fs.MoveWithOptions(c.Request.Context(), fileName, dstDir, fs.TransferOptions{
+			SkipHook:  len(movingFileNames) > i+1,
+			Overwrite: req.ConflictPolicy == OVERWRITE,
+		})
+		if t != nil {
+			addedTasks = append(addedTasks, t)
+		}
 		if err != nil {
 			common.ErrorResp(c, err, 500)
 			return
@@ -143,5 +163,7 @@ func FsRecursiveMove(c *gin.Context) {
 		count++
 	}
 
-	common.SuccessWithMsgResp(c, fmt.Sprintf("Successfully moved %d %s", count, common.Pluralize(count, "file", "files")))
+	common.SuccessWithMsgResp(c, fmt.Sprintf("Successfully moved %d %s", count, common.Pluralize(count, "file", "files")), gin.H{
+		"tasks": getTaskInfos(addedTasks),
+	})
 }

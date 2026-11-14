@@ -59,7 +59,7 @@ export const RemoveEmptyDirectory = () => {
               onClose()
               const resp = await ok(dir)
               handleRespWithNotifySuccess(resp, () => {
-                refresh()
+                refresh(false, true)
               })
             }}
           >

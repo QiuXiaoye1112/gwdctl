@@ -11,6 +11,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/internal/op"
 	"github.com/OpenListTeam/OpenList/v4/internal/task"
+	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 	"github.com/pkg/errors"
 )
 
@@ -68,8 +69,18 @@ func MakeDir(ctx context.Context, path string) error {
 	return err
 }
 
+// TransferOptions configures conflict and hook behavior for Move, Copy, CopyTo, and Merge tasks.
+type TransferOptions struct {
+	SkipHook  bool
+	Overwrite bool
+}
+
 func Move(ctx context.Context, srcPath, dstDirPath string, skipHook ...bool) (task.TaskExtensionInfo, error) {
-	req, err := transfer(ctx, move, srcPath, dstDirPath, "", skipHook...)
+	return MoveWithOptions(ctx, srcPath, dstDirPath, TransferOptions{SkipHook: utils.IsBool(skipHook...)})
+}
+
+func MoveWithOptions(ctx context.Context, srcPath, dstDirPath string, opts TransferOptions) (task.TaskExtensionInfo, error) {
+	req, err := transfer(ctx, move, srcPath, dstDirPath, "", opts)
 	if err != nil {
 		log.Errorf("failed move %s to %s: %+v", srcPath, dstDirPath, err)
 	}
@@ -77,7 +88,11 @@ func Move(ctx context.Context, srcPath, dstDirPath string, skipHook ...bool) (ta
 }
 
 func Copy(ctx context.Context, srcObjPath, dstDirPath string, skipHook ...bool) (task.TaskExtensionInfo, error) {
-	res, err := transfer(ctx, copy, srcObjPath, dstDirPath, "", skipHook...)
+	return CopyWithOptions(ctx, srcObjPath, dstDirPath, TransferOptions{SkipHook: utils.IsBool(skipHook...)})
+}
+
+func CopyWithOptions(ctx context.Context, srcObjPath, dstDirPath string, opts TransferOptions) (task.TaskExtensionInfo, error) {
+	res, err := transfer(ctx, copy, srcObjPath, dstDirPath, "", opts)
 	if err != nil {
 		log.Errorf("failed copy %s to %s: %+v", srcObjPath, dstDirPath, err)
 	}
@@ -86,7 +101,11 @@ func Copy(ctx context.Context, srcObjPath, dstDirPath string, skipHook ...bool) 
 
 // CopyTo copies a file or directory to dstDirPath using dstName as its name.
 func CopyTo(ctx context.Context, srcObjPath, dstDirPath, dstName string, skipHook ...bool) (task.TaskExtensionInfo, error) {
-	res, err := transfer(ctx, copy, srcObjPath, dstDirPath, dstName, skipHook...)
+	return CopyToWithOptions(ctx, srcObjPath, dstDirPath, dstName, TransferOptions{SkipHook: utils.IsBool(skipHook...)})
+}
+
+func CopyToWithOptions(ctx context.Context, srcObjPath, dstDirPath, dstName string, opts TransferOptions) (task.TaskExtensionInfo, error) {
+	res, err := transfer(ctx, copy, srcObjPath, dstDirPath, dstName, opts)
 	if err != nil {
 		log.Errorf("failed copy %s to %s as %s: %+v", srcObjPath, dstDirPath, dstName, err)
 	}
@@ -94,19 +113,27 @@ func CopyTo(ctx context.Context, srcObjPath, dstDirPath, dstName string, skipHoo
 }
 
 func Merge(ctx context.Context, srcObjPath, dstDirPath string, skipHook ...bool) (task.TaskExtensionInfo, error) {
-	res, err := transfer(ctx, merge, srcObjPath, dstDirPath, "", skipHook...)
+	return MergeWithOptions(ctx, srcObjPath, dstDirPath, TransferOptions{SkipHook: utils.IsBool(skipHook...)})
+}
+
+func MergeWithOptions(ctx context.Context, srcObjPath, dstDirPath string, opts TransferOptions) (task.TaskExtensionInfo, error) {
+	res, err := transfer(ctx, merge, srcObjPath, dstDirPath, "", opts)
 	if err != nil {
 		log.Errorf("failed merge %s to %s: %+v", srcObjPath, dstDirPath, err)
 	}
 	return res, err
 }
 
-func Rename(ctx context.Context, srcPath, dstName string, skipHook ...bool) error {
-	err := rename(ctx, srcPath, dstName, skipHook...)
+func RenameWithOptions(ctx context.Context, srcPath, dstName string, opts TransferOptions) error {
+	err := renameWithOptions(ctx, srcPath, dstName, opts)
 	if err != nil {
 		log.Errorf("failed rename %s to %s: %+v", srcPath, dstName, err)
 	}
 	return err
+}
+
+func Rename(ctx context.Context, srcPath, dstName string, skipHook ...bool) error {
+	return RenameWithOptions(ctx, srcPath, dstName, TransferOptions{SkipHook: utils.IsBool(skipHook...)})
 }
 
 func Remove(ctx context.Context, path string) error {
