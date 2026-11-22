@@ -101,9 +101,6 @@ const Init = () => {
   const [siteTitle, setSiteTitle] = createSignal(
     getSetting("site_title") || "Cloud Drive",
   )
-  const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null
-  const initialToken = urlParams ? urlParams.get("token") || "" : ""
-  const [token, setToken] = createSignal(initialToken)
   const [phase, setPhase] = createSignal<Phase>("idle")
   const [step, setStep] = createSignal<Step>("env")
   const env = useEnvCheck()
@@ -212,7 +209,6 @@ const Init = () => {
       username: username(),
       password: password(),
       site_title: siteTitle(),
-      token: token().trim(),
     }),
   )
 
@@ -503,17 +499,6 @@ const Init = () => {
             placeholder={t("init.site_title-tips")}
             value={siteTitle()}
             onInput={(e) => setSiteTitle(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                submit()
-              }
-            }}
-          />
-          <Input
-            name="token"
-            placeholder={t("init.token-tips") || "Setup Token (CLI: gwd admin token)"}
-            value={token()}
-            onInput={(e) => setToken(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 submit()

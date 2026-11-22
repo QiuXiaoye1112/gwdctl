@@ -54,6 +54,5 @@
   "error_title": "初始化失败",
   "error_code": "错误码",
   "storage_issue_title": "检测到存储问题",
-  "storage_issue_hint": "修复存储配置后在重试前重新检查环境。",
-  "token-tips": "初始化凭据（gwd admin token 或配置 setup_token）"
+  "storage_issue_hint": "修复存储配置后在重试前重新检查环境。"
 }
