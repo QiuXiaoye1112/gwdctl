@@ -506,14 +506,16 @@ const Init = () => {
             }}
           />
           <HStack w="$full" spacing="$2">
-            <Button
-              variant="subtle"
-              colorScheme="neutral"
-              flex="1"
-              onClick={() => setStep("env")}
-            >
-              {t("init.back")}
-            </Button>
+            <Show when={showEnvStep()}>
+              <Button
+                variant="subtle"
+                colorScheme="neutral"
+                flex="1"
+                onClick={() => setStep("env")}
+              >
+                {t("init.back")}
+              </Button>
+            </Show>
             <Button colorScheme="primary" flex="2" onClick={submit}>
               {t("init.setup")}
             </Button>

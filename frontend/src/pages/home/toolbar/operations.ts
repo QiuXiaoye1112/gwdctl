@@ -4,9 +4,8 @@ import { CgRename, CgShare } from "solid-icons/cg"
 import { TbArchive, TbFileArrowRight } from "solid-icons/tb"
 import { TbCopy } from "solid-icons/tb"
 import { AiTwotoneDelete } from "solid-icons/ai"
-import { CgFileAdd, CgFolderAdd, CgFolderRemove } from "solid-icons/cg"
+import { CgFolderAdd, CgFolderRemove } from "solid-icons/cg"
 import { AiOutlineCloudDownload } from "solid-icons/ai"
-import { ImMoveUp } from "solid-icons/im"
 import { FaSolidMagnet, FaSolidSeedling } from "solid-icons/fa"
 
 export interface Operations {
@@ -23,9 +22,7 @@ export const operations: Operations = {
   delete: { icon: AiTwotoneDelete, color: "$danger9" },
   decompress: { icon: TbArchive, color: "$neutral9" },
   mkdir: { icon: CgFolderAdd, p: true },
-  recursive_move: { icon: ImMoveUp, p: true },
   remove_empty_directory: { icon: CgFolderRemove, p: true },
-  new_file: { icon: CgFileAdd, p: true },
   cancel_select: { icon: TiDeleteOutline },
   download: { icon: AiOutlineCloudDownload, color: "$primary9" },
   direct_download: { icon: AiOutlineCloudDownload, color: "$primary9" },

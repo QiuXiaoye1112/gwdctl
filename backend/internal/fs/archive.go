@@ -106,8 +106,13 @@ func (t *ArchiveDownloadTask) RunWithoutPushUploadTask() (*ArchiveContentUploadT
 	if err != nil {
 		return nil, err
 	}
+	if ctxErr := t.Ctx().Err(); ctxErr != nil {
+		_ = os.RemoveAll(dir)
+		return nil, ctxErr
+	}
 	err = tool.Decompress(ss, dir, t.ArchiveInnerArgs, decompressUp)
 	if err != nil {
+		_ = os.RemoveAll(dir)
 		return nil, err
 	}
 	t.SetProgress(100)

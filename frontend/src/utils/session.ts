@@ -120,12 +120,13 @@ export const setupSessionSecurity = (onLogout: () => void) => {
   window.addEventListener("mousemove", onMouseMove, { passive: true })
 
   const check = () => checkSessionTimeout(onLogout)
-  window.addEventListener("focus", check)
-  document.addEventListener("visibilitychange", () => {
+  const onVisibilityChange = () => {
     if (document.visibilityState === "visible") {
       check()
     }
-  })
+  }
+  window.addEventListener("focus", check)
+  document.addEventListener("visibilitychange", onVisibilityChange)
 
   // Periodic interval check every 5 seconds
   const timer = setInterval(check, 5000)
@@ -136,6 +137,7 @@ export const setupSessionSecurity = (onLogout: () => void) => {
     })
     window.removeEventListener("mousemove", onMouseMove)
     window.removeEventListener("focus", check)
+    document.removeEventListener("visibilitychange", onVisibilityChange)
     clearInterval(timer)
   }
 }

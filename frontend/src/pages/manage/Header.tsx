@@ -21,6 +21,7 @@ import { useFetch, useRouter, useT } from "~/hooks"
 import { SideMenu } from "./SideMenu"
 import { side_menu_items } from "./sidemenu_items"
 import { changeToken, handleResp, notify, r } from "~/utils"
+import { Me, setMe } from "~/store"
 import { PResp } from "~/types"
 const { isOpen, onOpen, onClose } = createDisclosure()
 const [logOutReqLoading, logOutReq] = useFetch((): PResp<any> =>
@@ -33,8 +34,9 @@ const Header = () => {
   const logOut = async () => {
     handleResp(await logOutReq(), () => {
       changeToken()
+      setMe({} as Me)
       notify.success(t("manage.logout_success"))
-      to(`/@login?redirect=${encodeURIComponent(location.pathname)}`)
+      to(`/@login?redirect=${encodeURIComponent(location.pathname)}`, true)
     })
   }
   return (

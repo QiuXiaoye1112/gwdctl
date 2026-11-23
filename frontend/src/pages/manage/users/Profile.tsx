@@ -12,9 +12,10 @@ import {
 } from "@hope-ui/solid"
 import { createSignal, Show } from "solid-js"
 import { useFetch, useManageTitle, useRouter, useT } from "~/hooks"
-import { setMe, me, setSettings } from "~/store"
+import { Me, setMe, me, setSettings } from "~/store"
 import { EmptyResp, PEmptyResp } from "~/types"
 import {
+  changeToken,
   handleResp,
   notify,
   r,
@@ -175,9 +176,10 @@ const Profile = () => {
     if (usernameChanged || passwordChanged) {
       const resp = await save()
       handleResp(resp, () => {
-        setMe({ ...me(), username: username() })
+        changeToken("")
+        setMe({} as Me)
         notify.success(t("users.update_profile_success"))
-        to(`/@login?redirect=${encodeURIComponent(location.pathname)}`)
+        to(`/@login?redirect=${encodeURIComponent(location.pathname)}`, true)
       })
     } else if (settingSuccess) {
       notify.success(

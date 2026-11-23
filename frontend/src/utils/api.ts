@@ -106,14 +106,6 @@ export const fsMove = (
   })
 }
 
-export const fsRecursiveMove = (
-  src_dir: string,
-  dst_dir: string,
-  conflict_policy: string,
-): TransferTasksResp => {
-  return r.post("/fs/recursive_move", { src_dir, dst_dir, conflict_policy })
-}
-
 export const fsCopy = (
   src_dir: string,
   dst_dir: string,
@@ -144,20 +136,6 @@ export const fsRemove = (
 
 export const fsRemoveEmptyDirectory = (src_dir: string): PEmptyResp => {
   return r.post("/fs/remove_empty_directory", { src_dir })
-}
-
-export const fsNewFile = (
-  path: string,
-  password: string,
-  overwrite: boolean,
-): PEmptyResp => {
-  return r.put("/fs/put", undefined, {
-    headers: {
-      "File-Path": encodeURIComponent(path),
-      Password: password,
-      Overwrite: overwrite.toString(),
-    },
-  })
 }
 
 export const fsArchiveMeta = (

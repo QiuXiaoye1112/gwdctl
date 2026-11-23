@@ -4,9 +4,7 @@ import { Right } from "./Right"
 import { Copy, Move } from "./CopyMove"
 import { Delete } from "./Delete"
 import { Rename } from "./Rename"
-import { NewFile } from "./NewFile"
 import { Mkdir } from "./Mkdir"
-import { RecursiveMove } from "./RecursiveMove"
 import { RemoveEmptyDirectory } from "./RemoveEmptyDirectory"
 import { DirectDownloadModal, PackageDownloadModal } from "./Download"
 import { lazy } from "solid-js"
@@ -27,10 +25,8 @@ export const Modal = () => {
       <Rename />
       <Delete />
       <Decompress />
-      <NewFile />
       <Mkdir />
       <Share />
-      <RecursiveMove />
       <RemoveEmptyDirectory />
       <DirectDownloadModal />
       <PackageDownloadModal />

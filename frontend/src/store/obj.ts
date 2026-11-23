@@ -1,12 +1,21 @@
-import naturalSort from "typescript-natural-sort"
 import { cookieStorage, createStorageSignal } from "@solid-primitives/storage"
 import { createMemo, createSignal } from "solid-js"
-import { createStore, produce } from "solid-js/store"
+import { createStore, produce, unwrap } from "solid-js/store"
 import { Obj, ObjType, StoreObj } from "~/types"
-import { bus, log } from "~/utils"
+import { bus, getFileSize, log } from "~/utils"
+import {
+  compareObjs,
+  DEFAULT_SORT_STATE,
+  isValidOrderBy,
+  nextSortState,
+  OrderBy,
+  SortState,
+} from "~/utils/sort"
 import { keyPressed } from "./key-event"
 import { local } from "./local_settings"
 import { useT } from "~/hooks"
+
+export type { OrderBy, SortState }
 
 export enum State {
   Initial, // Initial state
@@ -39,13 +48,65 @@ const [objStore, setObjStore] = createStore<
   }
 >(initialObjStore)
 
+const decodePathname = (raw: string) => {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+const [pathname, setPathname] = createSignal<string>(
+  decodePathname(location.pathname),
+)
+
+const SORT_KEY_PREFIX = "dir_sort_"
+
+export const loadDirSort = (dir: string): SortState => {
+  try {
+    const raw = localStorage.getItem(`${SORT_KEY_PREFIX}${dir}`)
+    if (!raw) return DEFAULT_SORT_STATE
+    const parsed = JSON.parse(raw) as Partial<SortState>
+    if (
+      parsed &&
+      isValidOrderBy(parsed.orderBy) &&
+      typeof parsed.reverse === "boolean"
+    ) {
+      const orderBy: OrderBy =
+        parsed.orderBy === "modified" ? "created" : parsed.orderBy
+      return { orderBy, reverse: parsed.reverse }
+    }
+  } catch (err) {
+    console.warn("failed to read sort config:", err)
+  }
+  return DEFAULT_SORT_STATE
+}
+
+export const saveDirSort = (dir: string, state: SortState) => {
+  try {
+    localStorage.setItem(`${SORT_KEY_PREFIX}${dir}`, JSON.stringify(state))
+  } catch (err) {
+    console.warn("failed to save sort config:", err)
+  }
+}
+
+const [dirSort, setDirSort] = createSignal<SortState>(loadDirSort(pathname()))
+
+export { dirSort }
+
+let lastAppliedSort: SortState | null = null
+
 const setObjs = (objs: Obj[]) => {
   lastChecked.start = -1
   lastChecked.end = -1
-  setObjStore(
-    "objs",
-    (objs ?? []).map((obj) => ({ ...obj, selected: false })),
-  )
+  const state = dirSort()
+  const next: StoreObj[] = (objs ?? []).map((obj) => ({
+    ...obj,
+    selected: false,
+  }))
+  next.sort((a, b) => compareObjs(a, b, state.orderBy, state.reverse))
+  lastAppliedSort = { ...state }
+  setObjStore("objs", next)
   setObjStore("obj", "is_dir", true)
 }
 
@@ -88,25 +149,53 @@ export const ObjStore = {
   setErr: (err: string) => setObjStore("err", err),
 }
 
-export type OrderBy = "name" | "size" | "modified"
-
 export const sortObjs = (orderBy: OrderBy, reverse?: boolean) => {
-  log("sort:", orderBy, reverse)
-  setObjStore(
-    "objs",
-    produce((objs) =>
-      objs.sort((a, b) => {
-        return (reverse ? -1 : 1) * naturalSort(a[orderBy], b[orderBy])
-      }),
-    ),
+  const rev = !!reverse
+  if (
+    lastAppliedSort &&
+    lastAppliedSort.orderBy === orderBy &&
+    lastAppliedSort.reverse === rev
+  ) {
+    return
+  }
+  lastAppliedSort = { orderBy, reverse: rev }
+  log("sort:", orderBy, rev)
+  const next = [...unwrap(objStore.objs)].sort((a, b) =>
+    compareObjs(a, b, orderBy, rev),
   )
+  setObjStore("objs", next)
+}
+
+export const applyDirSort = (orderBy: OrderBy, reverse: boolean) => {
+  const next: SortState = { orderBy, reverse }
+  saveDirSort(pathname(), next)
+  setDirSort(next)
+  sortObjs(orderBy, reverse)
+}
+
+export const toggleDirSort = (orderBy: OrderBy) => {
+  const next = nextSortState(dirSort(), orderBy)
+  applyDirSort(next.orderBy, next.reverse)
+}
+
+export const syncSortForPath = (p: string) => {
+  const prevPath = pathname()
+  const saved = loadDirSort(p)
+  setPathname(p)
+  setDirSort(saved)
+  if (prevPath === p && objStore.objs.length > 0) {
+    sortObjs(saved.orderBy, saved.reverse)
+  }
 }
 
 export const appendObjs = (objs: Obj[]) => {
+  const state = dirSort()
+  lastAppliedSort = { ...state }
   setObjStore(
     "objs",
     produce((prev) => {
       prev.push(...(objs ?? []).map((obj) => ({ ...obj, selected: false })))
+      prev.sort((a, b) => compareObjs(a, b, state.orderBy, state.reverse))
     }),
   )
 }
@@ -190,7 +279,6 @@ export const isIndeterminate = () => {
 const selectedNum = createMemo(() => selectedObjs().length)
 
 export type LayoutType = "list" | "grid"
-const [pathname, setPathname] = createSignal<string>(location.pathname)
 let layoutRecord: Record<string, LayoutType> = (() => {
   try {
     return JSON.parse(localStorage.getItem("layoutRecord") || "{}")
@@ -210,7 +298,7 @@ export const clearLayoutRecord = () => {
   setLayoutRecordsSignal({})
 }
 
-bus.on("pathname", (p) => setPathname(p))
+bus.on("pathname", (p) => syncSortForPath(p))
 
 export const layout = createMemo<LayoutType>(() => {
   const currentPath = pathname()
@@ -274,7 +362,10 @@ const getCountStr = (
         : files
           ? `${prefix}_files`
           : ""
-  return key ? t(`home.obj.count.${key}`, vars) : ""
+  if (!key) return ""
+  const base = t(`home.obj.count.${key}`, vars)
+  const totalSize = objs.reduce((sum, o) => sum + (o.size > 0 ? o.size : 0), 0)
+  return totalSize > 0 ? `${base} (${getFileSize(totalSize)})` : base
 }
 
 export const countMsg = (filterType?: ObjType) =>

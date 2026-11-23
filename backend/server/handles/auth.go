@@ -61,8 +61,13 @@ func loginHash(c *gin.Context, req *LoginReq) {
 	}
 	// check 2FA
 	if user.OtpSecret != "" {
+		if req.OtpCode == "" {
+			// 402 - prompt for OTP without counting initial password verification as a failed attempt
+			common.ErrorStrResp(c, model.Invalid2FACode, 402)
+			return
+		}
 		if !totp.Validate(req.OtpCode, user.OtpSecret) {
-			// 402 - need opt
+			// 402 - invalid OTP counts against login attempts
 			common.ErrorStrResp(c, model.Invalid2FACode, 402)
 			model.LoginCache.Set(ip, count+1, cache.WithEx[int](model.DefaultLockDuration))
 			return

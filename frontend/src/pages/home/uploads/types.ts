@@ -24,6 +24,7 @@ type Status =
 export interface UploadFileProps {
   name: string
   path: string
+  fullPath?: string
   size: number
   progress: number
   speed: number

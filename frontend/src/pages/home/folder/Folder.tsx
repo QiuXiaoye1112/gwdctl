@@ -1,5 +1,4 @@
 import {
-  lazy,
   createEffect,
   createMemo,
   onCleanup,
@@ -7,14 +6,22 @@ import {
   Match,
   on,
 } from "solid-js"
-import { layout, selectAll } from "~/store"
+import {
+  countMsg,
+  layout,
+  local,
+  objStore,
+  selectAll,
+  smartCountMsg,
+  syncSortForPath,
+} from "~/store"
 import { ContextMenu } from "./context-menu"
 import { Pager } from "./Pager"
-import { useLink, useRouter, useT } from "~/hooks"
-import { objStore, local } from "~/store"
+import { useLink, useRouter } from "~/hooks"
 import { ObjType } from "~/types"
 import { bus } from "~/utils"
 import { clearSelectionCache } from "./helper"
+import { SortBar } from "./SortBar"
 import lightGallery from "lightgallery"
 import lgThumbnail from "lightgallery/plugins/thumbnail"
 import lgZoom from "lightgallery/plugins/zoom"
@@ -25,17 +32,18 @@ import "lightgallery/css/lightgallery-bundle.css"
 import { LightGallery } from "lightgallery/lightgallery"
 import { Search } from "./Search"
 
-const ListLayout = lazy(() => import("./List"))
-const GridLayout = lazy(() => import("./Grid"))
+import ListLayout from "./List"
+import GridLayout from "./Grid"
 
 const Folder = () => {
   const { pathname } = useRouter()
   createEffect(
     on(
       pathname,
-      () => {
+      (p) => {
         selectAll(false)
         clearSelectionCache()
+        syncSortForPath(p)
       },
       { defer: false },
     ),
@@ -78,9 +86,12 @@ const Folder = () => {
     bus.off("gallery")
     dynamicGallery?.destroy()
   })
-  const t = useT()
   return (
     <>
+      <SortBar
+        countText={() => (layout() === "grid" ? smartCountMsg() : countMsg())}
+        isGrid={() => layout() === "grid"}
+      />
       <Switch>
         <Match when={layout() === "list"}>
           <ListLayout />

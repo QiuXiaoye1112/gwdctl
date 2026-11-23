@@ -110,7 +110,7 @@ export function useSelectWithMouse() {
       const index = Number($selectedItem?.getAttribute("data-index"))
 
       const isClickOnContainer = Number.isNaN(index)
-      const isClickOnSelectedItems = () => !!objStore.objs[index].selected
+      const isClickOnSelectedItems = () => !!objStore.objs[index]?.selected
       if (isClickOnContainer || !isClickOnSelectedItems()) return
 
       e.stopPropagation()

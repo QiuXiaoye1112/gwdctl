@@ -18,9 +18,15 @@ export const Delete = () => {
   const t = useT()
   const { isOpen, onOpen, onClose } = createDisclosure()
   const [loading, ok] = useFetch(fsRemove)
+  const [submitting, setSubmitting] = createSignal(false)
+  const busy = () => loading() || submitting()
   const { refresh } = usePath()
   const { pathname } = useRouter()
   const [followSeed, setFollowSeed] = createSignal(false)
+  const handleClose = () => {
+    if (busy()) return
+    onClose()
+  }
   const handler = (name: string) => {
     if (name === "delete") {
       setFollowSeed(false)
@@ -35,7 +41,9 @@ export const Delete = () => {
     <Modal
       blockScrollOnMount={false}
       opened={isOpen()}
-      onClose={onClose}
+      onClose={handleClose}
+      closeOnOverlayClick={!busy()}
+      closeOnEsc={!busy()}
       size={{
         "@initial": "xs",
         "@md": "md",
@@ -48,20 +56,34 @@ export const Delete = () => {
           <p>{t("home.toolbar.delete-tips")}</p>
         </ModalBody>
         <ModalFooter display="flex" gap="$2">
-          <Button onClick={onClose} colorScheme="neutral">
+          <Button
+            disabled={busy()}
+            onClick={handleClose}
+            colorScheme="neutral"
+          >
             {t("global.cancel")}
           </Button>
           <Button
             colorScheme="danger"
-            loading={loading()}
+            loading={busy()}
             onClick={async () => {
+              if (busy()) return
               const dir = pathname()
               const names = selectedObjs().map((obj) => obj.name)
-              onClose()
-              const resp = await ok(dir, names, false)
-              handleRespWithNotifySuccess(resp, () => {
-                refresh(false, true)
-              })
+              setSubmitting(true)
+              try {
+                const resp = await ok(dir, names, false)
+                let succeeded = false
+                handleRespWithNotifySuccess(resp, () => {
+                  succeeded = true
+                })
+                if (succeeded) {
+                  await refresh(false, true)
+                  onClose()
+                }
+              } finally {
+                setSubmitting(false)
+              }
             }}
           >
             {t("global.confirm")}

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/OpenListTeam/OpenList/v4/drivers/base"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
@@ -20,6 +21,10 @@ type GoogleDrive struct {
 	model.Storage
 	Addition
 	AccessToken string
+	tokenMu     sync.RWMutex
+	refreshMu   sync.Mutex
+	sizeIdxOnce sync.Once
+	sizeIdx     *folderSizeIndex
 }
 
 func (d *GoogleDrive) Config() driver.Config {
@@ -34,10 +39,15 @@ func (d *GoogleDrive) Init(ctx context.Context) error {
 	if d.ChunkSize == 0 {
 		d.ChunkSize = 5
 	}
-	return d.refreshToken()
+	if err := d.refreshToken(); err != nil {
+		return err
+	}
+	d.maybeRefreshFolderSizes(false)
+	return nil
 }
 
 func (d *GoogleDrive) Drop(ctx context.Context) error {
+	d.stopSizeIndex()
 	return nil
 }
 
@@ -70,19 +80,27 @@ func getReadID(obj model.Obj) string {
 }
 
 func (d *GoogleDrive) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]model.Obj, error) {
-	files, err := d.getFiles(getReadID(dir))
+	files, err := d.getFiles(ctx, getReadID(dir))
 	if err != nil {
 		return nil, err
 	}
+	idx := d.getSizeIndex()
+	d.maybeRefreshFolderSizes(args.Refresh)
 	return utils.SliceConvert(files, func(src File) (model.Obj, error) {
-		return fileToObj(src), nil
+		obj := fileToObj(src)
+		if obj.IsDir() {
+			if gdObj, ok := obj.(*GoogleDriveObj); ok {
+				gdObj.sizeIndex = idx
+			}
+		}
+		return obj, nil
 	})
 }
 
 func (d *GoogleDrive) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
 	fileURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?includeItemsFromAllDrives=true&supportsAllDrives=true", getReadID(file))
 	var metadata File
-	_, err := d.request(fileURL, http.MethodGet, nil, &metadata)
+	_, err := d.requestWithContext(ctx, fileURL, http.MethodGet, nil, &metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +111,7 @@ func (d *GoogleDrive) Link(ctx context.Context, file model.Obj, args model.LinkA
 	link := model.Link{
 		URL: contentURL,
 		Header: http.Header{
-			"Authorization": []string{"Bearer " + d.AccessToken},
+			"Authorization": []string{"Bearer " + d.getAccessToken()},
 		},
 	}
 	return &link, nil
@@ -105,7 +123,7 @@ func (d *GoogleDrive) MakeDir(ctx context.Context, parentDir model.Obj, dirName 
 		"parents":  []string{getReadID(parentDir)},
 		"mimeType": "application/vnd.google-apps.folder",
 	}
-	_, err := d.request("https://www.googleapis.com/drive/v3/files", http.MethodPost, func(req *resty.Request) {
+	_, err := d.requestWithContext(ctx, "https://www.googleapis.com/drive/v3/files", http.MethodPost, func(req *resty.Request) {
 		req.SetBody(data)
 	}, nil)
 	return err
@@ -115,8 +133,8 @@ func (d *GoogleDrive) Move(ctx context.Context, srcObj, dstDir model.Obj) error 
 	var file struct {
 		Parents []string `json:"parents"`
 	}
-	url := "https://www.googleapis.com/drive/v3/files/" + srcObj.GetID()
-	_, err := d.request(url, http.MethodGet, func(req *resty.Request) {
+	apiURL := "https://www.googleapis.com/drive/v3/files/" + url.PathEscape(srcObj.GetID())
+	_, err := d.requestWithContext(ctx, apiURL, http.MethodGet, func(req *resty.Request) {
 		req.SetQueryParam("fields", "parents")
 	}, &file)
 	if err != nil {
@@ -126,9 +144,12 @@ func (d *GoogleDrive) Move(ctx context.Context, srcObj, dstDir model.Obj) error 
 		"addParents":    getReadID(dstDir),
 		"removeParents": strings.Join(file.Parents, ","),
 	}
-	_, err = d.request(url, http.MethodPatch, func(req *resty.Request) {
+	_, err = d.requestWithContext(ctx, apiURL, http.MethodPatch, func(req *resty.Request) {
 		req.SetQueryParams(query)
 	}, nil)
+	if err == nil {
+		d.scheduleFolderSizeRefresh(sizeIndexWriteDebounce)
+	}
 	return err
 }
 
@@ -136,8 +157,8 @@ func (d *GoogleDrive) Rename(ctx context.Context, srcObj model.Obj, newName stri
 	data := base.Json{
 		"name": newName,
 	}
-	url := "https://www.googleapis.com/drive/v3/files/" + srcObj.GetID()
-	_, err := d.request(url, http.MethodPatch, func(req *resty.Request) {
+	apiURL := "https://www.googleapis.com/drive/v3/files/" + url.PathEscape(srcObj.GetID())
+	_, err := d.requestWithContext(ctx, apiURL, http.MethodPatch, func(req *resty.Request) {
 		req.SetBody(data)
 	}, nil)
 	return err
@@ -151,10 +172,13 @@ func (d *GoogleDrive) Copy(ctx context.Context, srcObj, dstDir model.Obj) error 
 		"name":    srcObj.GetName(),
 		"parents": []string{getReadID(dstDir)},
 	}
-	url := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s/copy", srcObj.GetID())
-	_, err := d.request(url, http.MethodPost, func(req *resty.Request) {
+	apiURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s/copy", url.PathEscape(srcObj.GetID()))
+	_, err := d.requestWithContext(ctx, apiURL, http.MethodPost, func(req *resty.Request) {
 		req.SetBody(data)
 	}, nil)
+	if err == nil {
+		d.scheduleFolderSizeRefresh(sizeIndexWriteDebounce)
+	}
 	return err
 }
 
@@ -166,67 +190,81 @@ func (d *GoogleDrive) Remove(ctx context.Context, obj model.Obj) error {
 		"trashed": true,
 	}
 	apiURL := "https://www.googleapis.com/drive/v3/files/" + url.PathEscape(obj.GetID())
-	_, err := d.request(apiURL, http.MethodPatch, func(req *resty.Request) {
-		if ctx != nil {
-			req.SetContext(ctx)
-		}
+	_, err := d.requestWithContext(ctx, apiURL, http.MethodPatch, func(req *resty.Request) {
 		req.SetBody(data)
 	}, nil)
+	if err == nil {
+		d.scheduleFolderSizeRefresh(sizeIndexWriteDebounce)
+	}
 	return err
 }
 
 func (d *GoogleDrive) Put(ctx context.Context, dstDir model.Obj, stream model.FileStreamer, up driver.UpdateProgress) error {
 	obj := stream.GetExist()
 	var (
-		e    Error
-		url  string
-		data base.Json
-		res  *resty.Response
-		err  error
+		apiURL string
+		data   base.Json
 	)
 	if obj != nil {
-		url = fmt.Sprintf("https://www.googleapis.com/upload/drive/v3/files/%s?uploadType=resumable&supportsAllDrives=true", obj.GetID())
+		apiURL = fmt.Sprintf("https://www.googleapis.com/upload/drive/v3/files/%s?uploadType=resumable&supportsAllDrives=true", url.PathEscape(obj.GetID()))
 		data = base.Json{}
 	} else {
 		data = base.Json{
 			"name":    stream.GetName(),
 			"parents": []string{getReadID(dstDir)},
 		}
-		url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true"
+		apiURL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true"
 	}
-	req := base.NoRedirectClient.R().
-		SetHeaders(map[string]string{
-			"Authorization":           "Bearer " + d.AccessToken,
-			"X-Upload-Content-Type":   stream.GetMimetype(),
-			"X-Upload-Content-Length": strconv.FormatInt(stream.GetSize(), 10),
-		}).
-		SetError(&e).SetBody(data).SetContext(ctx)
-	if obj != nil {
-		res, err = req.Patch(url)
-	} else {
-		res, err = req.Post(url)
-	}
-	if err != nil {
-		return err
-	}
-	if res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401 {
-		err = d.refreshToken()
+
+	var putUrl string
+	for attempt := 0; attempt < 2; attempt++ {
+		var e Error
+		token := d.getAccessToken()
+		req := base.NoRedirectClient.R().
+			SetHeaders(map[string]string{
+				"Authorization":           "Bearer " + token,
+				"X-Upload-Content-Type":   stream.GetMimetype(),
+				"X-Upload-Content-Length": strconv.FormatInt(stream.GetSize(), 10),
+			}).
+			SetError(&e).SetBody(data)
+		if ctx != nil {
+			req.SetContext(ctx)
+		}
+		var (
+			res *resty.Response
+			err error
+		)
+		if obj != nil {
+			res, err = req.Patch(apiURL)
+		} else {
+			res, err = req.Post(apiURL)
+		}
 		if err != nil {
 			return err
 		}
-		return d.Put(ctx, dstDir, stream, up)
-	}
-	if res.IsError() {
-		if e.Error.Code != 0 {
-			return fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+		if (res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401) && attempt == 0 {
+			if err = d.refreshTokenIfNeeded(token); err != nil {
+				return err
+			}
+			continue
 		}
-		return fmt.Errorf("init upload session failed with HTTP %d: %s", res.StatusCode(), res.String())
+		if res.IsError() {
+			if e.Error.Code != 0 {
+				return fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+			}
+			return fmt.Errorf("init upload session failed with HTTP %d: %s", res.StatusCode(), res.String())
+		}
+		putUrl = res.Header().Get("location")
+		if putUrl == "" {
+			return fmt.Errorf("init upload session failed: missing Location header in response (HTTP %d)", res.StatusCode())
+		}
+		break
 	}
-	putUrl := res.Header().Get("location")
-	if putUrl == "" {
-		return fmt.Errorf("init upload session failed: missing Location header in response (HTTP %d)", res.StatusCode())
+	if err := d.chunkUpload(ctx, stream, putUrl, up); err != nil {
+		return err
 	}
-	return d.chunkUpload(ctx, stream, putUrl, up)
+	d.scheduleFolderSizeRefresh(sizeIndexWriteDebounce)
+	return nil
 }
 
 func (d *GoogleDrive) GetDetails(ctx context.Context) (*model.StorageDetails, error) {

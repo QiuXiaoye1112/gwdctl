@@ -14,13 +14,19 @@ import {
   fsRemoveEmptyDirectory,
   handleRespWithNotifySuccess,
 } from "~/utils"
-import { onCleanup } from "solid-js"
+import { createSignal, onCleanup } from "solid-js"
 
 export const RemoveEmptyDirectory = () => {
   const { isOpen, onOpen, onClose } = createDisclosure()
   const { pathname } = useRouter()
   const [loading, ok] = useFetch(fsRemoveEmptyDirectory)
+  const [submitting, setSubmitting] = createSignal(false)
+  const busy = () => loading() || submitting()
   const { refresh } = usePath()
+  const handleClose = () => {
+    if (busy()) return
+    onClose()
+  }
   const handler = (name: string) => {
     if (name === "removeEmptyDirectory") {
       onOpen()
@@ -35,7 +41,9 @@ export const RemoveEmptyDirectory = () => {
     <Modal
       blockScrollOnMount={false}
       opened={isOpen()}
-      onClose={onClose}
+      onClose={handleClose}
+      closeOnOverlayClick={!busy()}
+      closeOnEsc={!busy()}
       size={{
         "@initial": "xs",
         "@md": "md",
@@ -48,19 +56,33 @@ export const RemoveEmptyDirectory = () => {
           <p>{t("home.toolbar.remove_empty_directory-tips")}</p>
         </ModalBody>
         <ModalFooter display="flex" gap="$2">
-          <Button onClick={onClose} colorScheme="neutral">
+          <Button
+            disabled={busy()}
+            onClick={handleClose}
+            colorScheme="neutral"
+          >
             {t("global.cancel")}
           </Button>
           <Button
             colorScheme="danger"
-            loading={loading()}
+            loading={busy()}
             onClick={async () => {
+              if (busy()) return
               const dir = pathname()
-              onClose()
-              const resp = await ok(dir)
-              handleRespWithNotifySuccess(resp, () => {
-                refresh(false, true)
-              })
+              setSubmitting(true)
+              try {
+                const resp = await ok(dir)
+                let succeeded = false
+                handleRespWithNotifySuccess(resp, () => {
+                  succeeded = true
+                })
+                if (succeeded) {
+                  await refresh(false, true)
+                  onClose()
+                }
+              } finally {
+                setSubmitting(false)
+              }
             }}
           >
             {t("global.confirm")}

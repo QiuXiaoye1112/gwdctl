@@ -23,6 +23,8 @@ export const Rename = () => {
     onClose: onOverwriteClose,
   } = createDisclosure()
   const [loading, ok] = useFetch(fsRename)
+  const [submitting, setSubmitting] = createSignal(false)
+  const busy = () => loading() || submitting()
   const { pathname } = useRouter()
   const { refresh } = usePath()
   const [pendingRename, setPendingRename] = createSignal<{
@@ -31,6 +33,7 @@ export const Rename = () => {
   } | null>(null)
 
   const closeOverwriteModal = () => {
+    if (busy()) return
     setPendingRename(null)
     onOverwriteClose()
   }
@@ -59,24 +62,35 @@ export const Rename = () => {
           opened={isOpen()}
           onClose={onClose}
           defaultValue={selectedObjs()[0]?.name ?? ""}
-          loading={loading()}
+          loading={busy()}
           onSubmit={async (name) => {
+            if (busy()) return
             const srcObj = selectedObjs()[0]
             if (!srcObj) {
               onClose()
               return
             }
             const srcPath = pathJoin(pathname(), srcObj.name)
-            const resp = await ok(srcPath, name, false, false)
-            onClose()
-            if (resp.code === 409) {
-              setPendingRename({ srcPath, name })
-              onOverwriteOpen()
-              return
+            setSubmitting(true)
+            try {
+              const resp = await ok(srcPath, name, false, false)
+              if (resp.code === 409) {
+                onClose()
+                setPendingRename({ srcPath, name })
+                onOverwriteOpen()
+                return
+              }
+              let succeeded = false
+              handleRespWithNotifySuccess(resp, () => {
+                succeeded = true
+              })
+              if (succeeded) {
+                await refresh(false, true)
+                onClose()
+              }
+            } finally {
+              setSubmitting(false)
             }
-            handleRespWithNotifySuccess(resp, () => {
-              refresh(false, true)
-            })
           }}
         />
       </Show>
@@ -84,6 +98,8 @@ export const Rename = () => {
         blockScrollOnMount={false}
         opened={isOverwriteOpen()}
         onClose={closeOverwriteModal}
+        closeOnOverlayClick={!busy()}
+        closeOnEsc={!busy()}
         size={{
           "@initial": "xs",
           "@md": "md",
@@ -100,28 +116,44 @@ export const Rename = () => {
             </p>
           </ModalBody>
           <ModalFooter display="flex" gap="$2">
-            <Button onClick={closeOverwriteModal} colorScheme="neutral">
+            <Button
+              disabled={busy()}
+              onClick={closeOverwriteModal}
+              colorScheme="neutral"
+            >
               {t("global.cancel")}
             </Button>
             <Button
               colorScheme="danger"
-              loading={loading()}
+              loading={busy()}
               onClick={async () => {
+                if (busy()) return
                 const pending = pendingRename()
                 if (!pending) {
-                  closeOverwriteModal()
+                  setPendingRename(null)
+                  onOverwriteClose()
                   return
                 }
-                const resp = await ok(
-                  pending.srcPath,
-                  pending.name,
-                  true,
-                  false,
-                )
-                closeOverwriteModal()
-                handleRespWithNotifySuccess(resp, () => {
-                  refresh(false, true)
-                })
+                setSubmitting(true)
+                try {
+                  const resp = await ok(
+                    pending.srcPath,
+                    pending.name,
+                    true,
+                    false,
+                  )
+                  let succeeded = false
+                  handleRespWithNotifySuccess(resp, () => {
+                    succeeded = true
+                  })
+                  if (succeeded) {
+                    await refresh(false, true)
+                    setPendingRename(null)
+                    onOverwriteClose()
+                  }
+                } finally {
+                  setSubmitting(false)
+                }
               }}
             >
               {t("home.toolbar.rename_overwrite_confirm")}

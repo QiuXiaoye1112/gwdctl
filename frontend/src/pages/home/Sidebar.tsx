@@ -12,7 +12,8 @@ import {
 } from "solid-js"
 import { FolderTree, FolderTreeHandler } from "~/components"
 import { useRouter } from "~/hooks"
-import { local, objStore } from "~/store"
+import { local, me, objStore } from "~/store"
+import { UserMethods } from "~/types"
 import { objBoxRef } from "./Obj"
 
 function SidebarPanel() {
@@ -100,7 +101,13 @@ function SidebarPanel() {
 }
 
 export function Sidebar() {
-  const visible = createMemo(() => local["show_sidebar"] !== "none")
+  const { isShare } = useRouter()
+  const visible = createMemo(
+    () =>
+      !isShare() &&
+      !UserMethods.is_guest(me()) &&
+      local["show_sidebar"] !== "none",
+  )
 
   return (
     <Show when={visible()}>

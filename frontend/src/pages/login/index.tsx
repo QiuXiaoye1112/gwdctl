@@ -8,9 +8,8 @@ import {
   useColorModeValue,
   HStack,
   VStack,
-  Checkbox,
 } from "@hope-ui/solid"
-import { createMemo, createSignal, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js"
 import { SwitchColorMode, SwitchLanguageWhite } from "~/components"
 import { useLoading, useT, useTitle, useRouter } from "~/hooks"
 import {
@@ -23,26 +22,39 @@ import {
 } from "~/utils"
 import { Resp } from "~/types"
 import LoginBg from "./LoginBg"
-import { createStorageSignal } from "@solid-primitives/storage"
 import { getSetting } from "~/store"
 
 const Login = () => {
   const logos = getSetting("logo").split("\n")
-  const logo = useColorModeValue(logos[0], logos.pop())
+  const logo = useColorModeValue(logos[0], logos[logos.length - 1])
   const t = useT()
   const title = createMemo(() => {
     return `${t("login.login_to")} ${getSetting("site_title")}`
   })
   useTitle(title)
   const bgColor = useColorModeValue("white", "$neutral1")
-  const [username, setUsername] = createSignal(
-    localStorage.getItem("username") || "",
-  )
-  const [password, setPassword] = createSignal(
-    localStorage.getItem("password") || "",
-  )
+  const [username, setUsername] = createSignal("")
+  const [password, setPassword] = createSignal("")
   const [opt, setOpt] = createSignal("")
-  const [remember, setRemember] = createStorageSignal("remember-pwd", "false")
+  const [needOpt, setNeedOpt] = createSignal(false)
+  let totpInputRef: HTMLInputElement | undefined
+
+  // Purge any legacy plaintext credentials previously saved in localStorage;
+  // credential storage is delegated to the browser's native password manager.
+  onMount(() => {
+    try {
+      localStorage.removeItem("password")
+      localStorage.removeItem("username")
+      localStorage.removeItem("remember-pwd")
+    } catch {}
+  })
+
+  createEffect(() => {
+    if (needOpt()) {
+      queueMicrotask(() => totpInputRef?.focus())
+    }
+  })
+
   const [loading, data] = useLoading(
     async (): Promise<Resp<{ token: string }>> => {
       return r.post("/auth/login/hash", {
@@ -57,13 +69,6 @@ const Login = () => {
   const Login = async () => {
     if (loading()) return
 
-    if (remember() === "true") {
-      localStorage.setItem("username", username())
-      localStorage.setItem("password", password())
-    } else {
-      localStorage.removeItem("username")
-      localStorage.removeItem("password")
-    }
     const resp = await data()
     handleRespWithoutAuthAndNotify(
       resp,
@@ -77,18 +82,27 @@ const Login = () => {
       },
       (msg, code) => {
         if (!needOpt() && code === 402) {
+          setOpt("")
           setNeedOpt(true)
         } else {
           notify.error(msg)
+          if (needOpt() && code === 402) {
+            setOpt("")
+            queueMicrotask(() => totpInputRef?.focus())
+          }
         }
       },
     )
   }
-  const [needOpt, setNeedOpt] = createSignal(false)
 
   return (
     <Center zIndex="$docked" w="$full" h="100vh">
       <VStack
+        as="form"
+        onSubmit={(e: Event) => {
+          e.preventDefault()
+          void Login()
+        }}
         bgColor={bgColor()}
         rounded="$xl"
         p="24px"
@@ -110,6 +124,9 @@ const Login = () => {
             <Input
               id="totp"
               name="otp"
+              autocomplete="one-time-code"
+              inputMode="numeric"
+              ref={totpInputRef}
               placeholder={t("login.otp-tips")}
               value={opt()}
               onInput={(e) => {
@@ -119,66 +136,43 @@ const Login = () => {
                   void Login()
                 }
               }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  Login()
-                }
-              }}
             />
           }
         >
           <Input
             name="username"
+            autocomplete="username"
             placeholder={t("login.username-tips")}
             value={username()}
             onInput={(e) => setUsername(e.currentTarget.value)}
           />
           <Input
             name="password"
+            autocomplete="current-password"
             placeholder={t("login.password-tips")}
             type="password"
             value={password()}
             onInput={(e) => setPassword(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                Login()
-              }
-            }}
           />
-          <Flex
-            px="$1"
-            w="$full"
-            fontSize="$sm"
-            color="$neutral10"
-            justifyContent="flex-start"
-            alignItems="center"
-          >
-            <Checkbox
-              checked={remember() === "true"}
-              onChange={() =>
-                setRemember(remember() === "true" ? "false" : "true")
-              }
-            >
-              {t("login.remember")}
-            </Checkbox>
-          </Flex>
         </Show>
         <HStack w="$full" spacing="$2">
           <Button
+            type="button"
             colorScheme="primary"
             w="$full"
             onClick={() => {
               if (needOpt()) {
                 setOpt("")
+                setNeedOpt(false)
               } else {
                 setUsername("")
                 setPassword("")
               }
             }}
           >
-            {t("login.clear")}
+            {needOpt() ? t("global.back") : t("login.clear")}
           </Button>
-          <Button w="$full" loading={loading()} onClick={Login}>
+          <Button type="submit" w="$full" loading={loading()}>
             {t("login.login")}
           </Button>
         </HStack>

@@ -41,12 +41,26 @@ type GoogleDriveObj struct {
 	model.ObjThumb
 	TargetID       string
 	NativeMimeType string
+	sizeIndex      *folderSizeIndex
 }
 
 func (g *GoogleDriveObj) GetNativeMimeType() string { return g.NativeMimeType }
 
 func (g *GoogleDriveObj) GetTargetID() string {
 	return g.TargetID
+}
+
+func (g *GoogleDriveObj) GetSize() int64 {
+	if g.IsFolder && g.sizeIndex != nil {
+		id := g.ID
+		if g.TargetID != "" {
+			id = g.TargetID
+		}
+		if sz, ok := g.sizeIndex.lookup(id); ok {
+			return sz
+		}
+	}
+	return g.Size
 }
 
 func fileToObj(f File) model.Obj {

@@ -136,7 +136,7 @@ const AddOrEdit = () => {
               to("/@manage/shares", false, { replace: true })
             },
             (_msg, _code) => {
-              if (resp.data.id) {
+              if (resp.data?.id) {
                 to(`/@manage/shares/edit/${resp.data.id}`)
               }
             },

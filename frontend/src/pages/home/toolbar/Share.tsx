@@ -3,6 +3,7 @@ import {
   bus,
   getExpireDate,
   handleResp,
+  pathJoin,
   shareMessage,
   notify,
   r,
@@ -50,11 +51,9 @@ export const Share = () => {
         setLink("")
         setExpireString("")
         setExpireValid(true)
-        const paths = selectedObjs().map((obj) => {
-          const split =
-            pathname().endsWith("/") || obj.name.startsWith("/") ? "" : "/"
-          return `${me().base_path}${pathname()}${split}${obj.name}`
-        })
+        const paths = selectedObjs().map((obj) =>
+          pathJoin(me().base_path || "/", pathname(), obj.name),
+        )
         setShare({
           files: paths,
           expires: null,
@@ -75,11 +74,17 @@ export const Share = () => {
   const [okLoading, ok] = useFetch((): PResp<ShareInfo> => {
     return r.post(`/share/create`, share)
   })
+  const handleClose = () => {
+    if (okLoading()) return
+    onClose()
+  }
   return (
     <Modal
       blockScrollOnMount={false}
       opened={isOpen()}
-      onClose={onClose}
+      onClose={handleClose}
+      closeOnOverlayClick={!okLoading()}
+      closeOnEsc={!okLoading()}
       size={{
         "@initial": "xs",
         "@md": "md",
@@ -186,7 +191,11 @@ export const Share = () => {
               </VStack>
             </ModalBody>
             <ModalFooter display="flex" gap="$2">
-              <Button colorScheme="neutral" onClick={onClose}>
+              <Button
+                colorScheme="neutral"
+                disabled={okLoading()}
+                onClick={handleClose}
+              >
                 {t("global.cancel")}
               </Button>
               <Button
@@ -194,12 +203,17 @@ export const Share = () => {
                 disabled={!expireValid()}
                 loading={okLoading()}
                 onClick={async () => {
+                  if (okLoading()) return
                   const resp = await ok()
                   handleResp(resp, (data) => {
                     const msg = shareMessage(data, getSetting("share_summary_content"), getSetting("site_title"))
                     setLink(msg)
                     copy(msg)
-                    notify.success("分享链接已创建并自动复制到剪贴板！")
+                    notify.success(
+                      localStorage.getItem("lang") === "en"
+                        ? "Share link created and copied to clipboard!"
+                        : "分享链接已创建并自动复制到剪贴板！",
+                    )
                   })
                 }}
               >

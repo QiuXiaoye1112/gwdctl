@@ -95,40 +95,65 @@ function LocalSettingEdit(props: LocalSetting) {
           />
         </Match>
         <Match when={props.type === "number"}>
-          <ButtonGroup attached>
-            <IconButton
-              aria-label="decrease"
-              icon={<FaSolidMinus />}
-              onClick={() => {
-                setLocal(
-                  props.key,
-                  Math.max(1, parseInt(local[props.key]) - 1).toString(),
-                )
-              }}
-            />
-            <Input
-              type="number"
-              value={local[props.key]}
-              onInput={(e) => {
-                setLocal(props.key, e.currentTarget.value)
-              }}
-              borderRadius="$none"
-              style={{
-                "-moz-appearance": "textfield",
-                // @ts-ignore
-                "::-webkit-inner-spin-button": { display: "none" },
-                "::-webkit-outer-spin-button": { display: "none" },
-              }}
-              class="hide-spin"
-            />
-            <IconButton
-              aria-label="increase"
-              icon={<FaSolidPlus />}
-              onClick={() => {
-                setLocal(props.key, (parseInt(local[props.key]) + 1).toString())
-              }}
-            />
-          </ButtonGroup>
+          {(() => {
+            const minVal = props.key === "grid_item_size" ? 50 : 1
+            const maxVal = props.key === "grid_item_size" ? 300 : 10000
+            const fallbackVal = Number.parseInt(props.default, 10) || minVal
+            const parseClamped = (raw: string) => {
+              const n = Number.parseInt(raw, 10)
+              if (!Number.isFinite(n)) return fallbackVal
+              return Math.min(maxVal, Math.max(minVal, n))
+            }
+            return (
+              <ButtonGroup attached>
+                <IconButton
+                  aria-label="decrease"
+                  icon={<FaSolidMinus />}
+                  onClick={() => {
+                    const cur = parseClamped(local[props.key])
+                    setLocal(
+                      props.key,
+                      Math.max(minVal, cur - 1).toString(),
+                    )
+                  }}
+                />
+                <Input
+                  type="number"
+                  min={minVal}
+                  max={maxVal}
+                  value={local[props.key]}
+                  onInput={(e) => {
+                    setLocal(props.key, e.currentTarget.value)
+                  }}
+                  onBlur={(e) => {
+                    setLocal(
+                      props.key,
+                      parseClamped(e.currentTarget.value).toString(),
+                    )
+                  }}
+                  borderRadius="$none"
+                  style={{
+                    "-moz-appearance": "textfield",
+                    // @ts-ignore
+                    "::-webkit-inner-spin-button": { display: "none" },
+                    "::-webkit-outer-spin-button": { display: "none" },
+                  }}
+                  class="hide-spin"
+                />
+                <IconButton
+                  aria-label="increase"
+                  icon={<FaSolidPlus />}
+                  onClick={() => {
+                    const cur = parseClamped(local[props.key])
+                    setLocal(
+                      props.key,
+                      Math.min(maxVal, cur + 1).toString(),
+                    )
+                  }}
+                />
+              </ButtonGroup>
+            )
+          })()}
         </Match>
       </Switch>
     </FormControl>

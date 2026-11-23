@@ -46,6 +46,7 @@ import {
   validateFilename,
   notify,
 } from "~/utils"
+import { compareNames } from "~/utils/sort"
 
 export type FolderTreeHandler = {
   setPath: Setter<string>
@@ -129,7 +130,9 @@ const FolderTreeNode = (props: { path: string }) => {
       resp,
       (data) => {
         isLoaded = true
-        setChildren(data)
+        setChildren(
+          [...(data ?? [])].sort((a, b) => compareNames(a.name, b.name)),
+        )
       },
       () => {
         if (isOpen()) onToggle() // close folder while failed
@@ -362,12 +365,18 @@ export const ModalFolderChoose = (props: ModalFolderChooseProps) => {
   } else if (typeof props.defaultValue === "string") {
     setValue(props.defaultValue)
   }
+  const handleClose = () => {
+    if (props.loading) return
+    props.onClose()
+  }
   return (
     <Modal
       size="xl"
       blockScrollOnMount={false}
       opened={props.opened}
-      onClose={props.onClose}
+      onClose={handleClose}
+      closeOnOverlayClick={!props.loading}
+      closeOnEsc={!props.loading}
     >
       <ModalOverlay />
       <ModalContent>
@@ -399,12 +408,19 @@ export const ModalFolderChoose = (props: ModalFolderChooseProps) => {
             <Box mr="auto">{props.footerSlot}</Box>
           </Show>
           <HStack spacing="$2">
-            <Button onClick={props.onClose} colorScheme="neutral">
+            <Button
+              disabled={props.loading}
+              onClick={handleClose}
+              colorScheme="neutral"
+            >
               {t("global.cancel")}
             </Button>
             <Button
               loading={props.loading}
-              onClick={() => props.onSubmit?.(value())}
+              onClick={() => {
+                if (props.loading) return
+                props.onSubmit?.(value())
+              }}
             >
               {t("global.ok")}
             </Button>

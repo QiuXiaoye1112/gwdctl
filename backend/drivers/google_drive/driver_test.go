@@ -605,6 +605,7 @@ func TestRemoveMovesToTrash(t *testing.T) {
 	var reqs []recordedRemoveReq
 	base.RestyClient = resty.New().SetTransport(captureRemoveTransport{reqs: &reqs})
 	d := &GoogleDrive{AccessToken: "test-token"}
+	defer d.Drop(context.Background())
 
 	t.Run("regular_file", func(t *testing.T) {
 		reqs = nil
@@ -660,4 +661,233 @@ func TestRemoveMovesToTrash(t *testing.T) {
 			t.Fatalf("expected no HTTP calls on invalid object, got %d", len(reqs))
 		}
 	})
+}
+
+type persistent401Transport struct {
+	apiCalls     int
+	refreshCalls int
+}
+
+func (p *persistent401Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Host, "googleapis.com") && strings.Contains(req.URL.Path, "oauth2") {
+		p.refreshCalls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"access_token":"refreshed-%d"}`, p.refreshCalls))),
+			Request:    req,
+		}, nil
+	}
+	p.apiCalls++
+	return &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":401,"message":"Invalid Credentials"}}`)),
+		Request:    req,
+	}, nil
+}
+
+func TestRequest401RetriesAtMostOnce(t *testing.T) {
+	old := base.RestyClient
+	defer func() { base.RestyClient = old }()
+
+	tr := &persistent401Transport{}
+	base.RestyClient = resty.New().SetTransport(tr)
+	d := &GoogleDrive{
+		Addition: Addition{
+			ClientID:     "cid",
+			ClientSecret: "csec",
+			RefreshToken: "rtok",
+		},
+		AccessToken: "expired-token",
+	}
+
+	_, err := d.requestWithContext(context.Background(), "https://www.googleapis.com/drive/v3/files/abc", http.MethodGet, nil, nil)
+	if err == nil {
+		t.Fatalf("expected error on persistent 401, got nil")
+	}
+	if tr.refreshCalls != 1 {
+		t.Fatalf("expected exactly 1 token refresh, got %d", tr.refreshCalls)
+	}
+	if tr.apiCalls != 2 {
+		t.Fatalf("expected exactly 2 API calls (initial + 1 retry), got %d", tr.apiCalls)
+	}
+}
+
+func TestCopyRespectsCanceledContext(t *testing.T) {
+	old := base.RestyClient
+	defer func() { base.RestyClient = old }()
+
+	var called bool
+	base.RestyClient = resty.New().SetTransport(captureRemoveTransport{reqs: new([]recordedRemoveReq)})
+	_ = called
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d := &GoogleDrive{AccessToken: "test-token"}
+	err := d.Copy(ctx, &model.Object{ID: "src-1", Name: "a.txt"}, &model.Object{ID: "dst-1", IsFolder: true})
+	if err == nil {
+		t.Fatalf("expected context canceled error, got nil")
+	}
+}
+
+func TestComputeFolderSizes(t *testing.T) {
+	const folderMime = "application/vnd.google-apps.folder"
+	files := []sizeMetaFile{
+		// Multi-level tree: root -> a -> b -> c, plus root -> empty
+		{Id: "a", Parents: []string{"root"}, MimeType: folderMime},
+		{Id: "b", Parents: []string{"a"}, MimeType: folderMime},
+		{Id: "c", Parents: []string{"b"}, MimeType: folderMime},
+		{Id: "empty", Parents: []string{"root"}, MimeType: folderMime},
+		{Id: "f1", Parents: []string{"c"}, MimeType: "application/octet-stream", Size: "1000"},
+		{Id: "f2", Parents: []string{"a"}, MimeType: "image/jpeg", Size: "500"},
+		// Folder carrying a bogus size must be ignored
+		{Id: "bogus-folder", Parents: []string{"a"}, MimeType: folderMime, Size: "99999"},
+		// Non-numeric / zero / empty sizes must be ignored
+		{Id: "gdoc", Parents: []string{"a"}, MimeType: "application/vnd.google-apps.document", Size: ""},
+		{Id: "zero", Parents: []string{"a"}, MimeType: "text/plain", Size: "0"},
+		{Id: "bad", Parents: []string{"a"}, MimeType: "text/plain", Size: "not-a-number"},
+		// Diamond DAG: shared file in both p1 and p2 under droot -> droot must count once
+		{Id: "p1", Parents: []string{"droot"}, MimeType: folderMime},
+		{Id: "p2", Parents: []string{"droot"}, MimeType: folderMime},
+		{Id: "shared", Parents: []string{"p1", "p2"}, MimeType: "video/mp4", Size: "2048"},
+		// Cyclic parent chain: cyc1 <-> cyc2 with a file inside cyc1
+		{Id: "cyc1", Parents: []string{"cyc2"}, MimeType: folderMime},
+		{Id: "cyc2", Parents: []string{"cyc1"}, MimeType: folderMime},
+		{Id: "cycfile", Parents: []string{"cyc1"}, MimeType: "text/plain", Size: "77"},
+	}
+
+	got := computeFolderSizes(files)
+
+	want := map[string]int64{
+		"c":     1000,
+		"b":     1000,
+		"a":     1500,
+		"root":  1500,
+		"empty": 0,
+		"p1":    2048,
+		"p2":    2048,
+		"droot": 2048,
+		"cyc1":  77,
+		"cyc2":  77,
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("folder %q: got size %d, want %d (all=%v)", id, got[id], w, got)
+		}
+	}
+}
+
+type sizeIndexMockTransport struct {
+	allowIndex chan struct{}
+}
+
+func (m *sizeIndexMockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	q := req.URL.Query().Get("q")
+	pageToken := req.URL.Query().Get("pageToken")
+
+	var body string
+	switch {
+	case strings.Contains(q, "'root' in parents"):
+		body = `{
+			"files": [
+				{"id":"dir-a","name":"DirA","mimeType":"application/vnd.google-apps.folder"},
+				{"id":"dir-empty","name":"EmptyDir","mimeType":"application/vnd.google-apps.folder"},
+				{"id":"sc-dir","name":"DirAShortcut","mimeType":"application/vnd.google-apps.shortcut","shortcutDetails":{"targetId":"dir-a","targetMimeType":"application/vnd.google-apps.folder"}},
+				{"id":"file-1","name":"hello.txt","mimeType":"text/plain","size":"100"}
+			]
+		}`
+	case q == "trashed = false" && pageToken == "":
+		if m.allowIndex != nil {
+			select {
+			case <-m.allowIndex:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		}
+		body = `{
+			"nextPageToken": "page-2",
+			"files": [
+				{"id":"dir-a","parents":["root"],"mimeType":"application/vnd.google-apps.folder"},
+				{"id":"dir-sub","parents":["dir-a"],"mimeType":"application/vnd.google-apps.folder"},
+				{"id":"file-a1","parents":["dir-a"],"mimeType":"application/octet-stream","size":"1024"}
+			]
+		}`
+	case q == "trashed = false" && pageToken == "page-2":
+		body = `{
+			"files": [
+				{"id":"file-sub1","parents":["dir-sub"],"mimeType":"application/octet-stream","size":"2048"},
+				{"id":"file-1","parents":["root"],"mimeType":"text/plain","size":"100"}
+			]
+		}`
+	default:
+		body = `{"files":[]}`
+	}
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func TestListAttachesDynamicFolderSizeIndex(t *testing.T) {
+	old := base.RestyClient
+	defer func() { base.RestyClient = old }()
+
+	allowIndex := make(chan struct{})
+	base.RestyClient = resty.New().SetTransport(&sizeIndexMockTransport{allowIndex: allowIndex})
+
+	d := &GoogleDrive{AccessToken: "test-token"}
+	defer d.Drop(context.Background())
+
+	objs, err := d.List(context.Background(), &model.Object{ID: "root", IsFolder: true}, model.ListArgs{})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(objs) != 4 {
+		t.Fatalf("expected 4 objects, got %d", len(objs))
+	}
+
+	byName := make(map[string]model.Obj, len(objs))
+	for _, o := range objs {
+		byName[o.GetName()] = o
+	}
+
+	// Before background index completes, List returns immediately with 0 for folders and exact size for files.
+	if got := byName["DirA"].GetSize(); got != 0 {
+		t.Fatalf("expected DirA size 0 before index ready, got %d", got)
+	}
+	if got := byName["hello.txt"].GetSize(); got != 100 {
+		t.Fatalf("expected hello.txt size 100, got %d", got)
+	}
+
+	// Release background index pagination and wait for completion.
+	close(allowIndex)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := d.lookupFolderSize("dir-a"); ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Already-returned (cached) model.Obj instances must immediately report live recursive sizes.
+	if got := byName["DirA"].GetSize(); got != 3072 {
+		t.Fatalf("expected DirA recursive size 3072, got %d", got)
+	}
+	if got := byName["DirAShortcut"].GetSize(); got != 3072 {
+		t.Fatalf("expected DirAShortcut recursive size 3072 via targetId, got %d", got)
+	}
+	if got := byName["EmptyDir"].GetSize(); got != 0 {
+		t.Fatalf("expected EmptyDir size 0, got %d", got)
+	}
+	if got := byName["hello.txt"].GetSize(); got != 100 {
+		t.Fatalf("expected hello.txt size 100, got %d", got)
+	}
 }

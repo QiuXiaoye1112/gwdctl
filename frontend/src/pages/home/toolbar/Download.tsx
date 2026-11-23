@@ -15,7 +15,8 @@ import {
 import { createMemo, createSignal, lazy, onCleanup, Show, Suspense } from "solid-js"
 import { FullLoading } from "~/components"
 import { useDownload, useT } from "~/hooks"
-import { getSettingBool, oneChecked, selectedObjs } from "~/store"
+import { getSettingBool, me, oneChecked, selectedObjs } from "~/store"
+import { UserMethods } from "~/types"
 import { bus } from "~/utils"
 import { CenterIcon } from "./Icon"
 
@@ -137,7 +138,9 @@ export const PackageDownloadModal = () => {
 
   const handler = (name: string) => {
     if (name === "package_download") {
-      if (!getSettingBool("package_download")) return
+      if (!UserMethods.is_admin(me()) && !getSettingBool("package_download")) {
+        return
+      }
       setStep("confirm")
       onOpen()
     }

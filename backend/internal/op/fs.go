@@ -1145,6 +1145,9 @@ func putInternal(ctx context.Context, storage driver.Driver, dstDirPath string, 
 	tempPath := stdpath.Join(dstDirPath, tempName)
 	fi, err := GetUnwrap(ctx, storage, dstPath)
 	if err == nil {
+		if fi.IsDir() {
+			return nil, errors.New("cannot overwrite folder with file")
+		}
 		if fi.GetSize() == 0 {
 			err = Remove(ctx, storage, dstPath)
 			if err != nil {

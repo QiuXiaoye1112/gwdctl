@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/stream"
@@ -28,11 +29,33 @@ const (
 	FileInfoFields = "id,name,mimeType,size,md5Checksum,sha1Checksum,sha256Checksum"
 )
 
+func (d *GoogleDrive) getAccessToken() string {
+	d.tokenMu.RLock()
+	defer d.tokenMu.RUnlock()
+	return d.AccessToken
+}
+
+func (d *GoogleDrive) setAccessToken(token string) {
+	d.tokenMu.Lock()
+	d.AccessToken = token
+	d.tokenMu.Unlock()
+}
+
 func (d *GoogleDrive) refreshToken() error {
+	return d.refreshTokenIfNeeded("")
+}
+
+func (d *GoogleDrive) refreshTokenIfNeeded(failedToken string) error {
+	d.refreshMu.Lock()
+	defer d.refreshMu.Unlock()
+
+	if failedToken != "" && d.getAccessToken() != failedToken {
+		return nil
+	}
 	if d.ClientID == "" || d.ClientSecret == "" || d.RefreshToken == "" {
 		return fmt.Errorf("empty ClientID, ClientSecret or RefreshToken")
 	}
-	url := "https://www.googleapis.com/oauth2/v4/token"
+	tokenURL := "https://www.googleapis.com/oauth2/v4/token"
 	var resp base.TokenResp
 	var e TokenError
 	res, err := base.RestyClient.R().SetResult(&resp).SetError(&e).
@@ -41,7 +64,7 @@ func (d *GoogleDrive) refreshToken() error {
 			"client_secret": d.ClientSecret,
 			"refresh_token": d.RefreshToken,
 			"grant_type":    "refresh_token",
-		}).Post(url)
+		}).Post(tokenURL)
 	if err != nil {
 		return err
 	}
@@ -49,44 +72,62 @@ func (d *GoogleDrive) refreshToken() error {
 	if e.Error != "" {
 		return fmt.Errorf("%s", e.Error)
 	}
-	d.AccessToken = resp.AccessToken
+	if resp.AccessToken == "" {
+		return fmt.Errorf("token refresh returned empty access token (HTTP %d)", res.StatusCode())
+	}
+	d.setAccessToken(resp.AccessToken)
 	return nil
 }
 
-func (d *GoogleDrive) request(url string, method string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
-	req := base.RestyClient.R()
-	req.SetHeader("Authorization", "Bearer "+d.AccessToken)
-	req.SetQueryParam("includeItemsFromAllDrives", "true")
-	req.SetQueryParam("supportsAllDrives", "true")
-	if callback != nil {
-		callback(req)
-	}
-	if resp != nil {
-		req.SetResult(resp)
-	}
-	var e Error
-	req.SetError(&e)
-	res, err := req.Execute(method, url)
-	if err != nil {
-		return nil, err
-	}
-	if res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401 {
-		err = d.refreshToken()
+func (d *GoogleDrive) request(apiURL string, method string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
+	return d.requestWithContext(context.Background(), apiURL, method, callback, resp)
+}
+
+func (d *GoogleDrive) requestWithContext(ctx context.Context, apiURL string, method string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		token := d.getAccessToken()
+		req := base.RestyClient.R()
+		if ctx != nil {
+			req.SetContext(ctx)
+		}
+		req.SetHeader("Authorization", "Bearer "+token)
+		req.SetQueryParam("includeItemsFromAllDrives", "true")
+		req.SetQueryParam("supportsAllDrives", "true")
+		if callback != nil {
+			callback(req)
+		}
+		if resp != nil {
+			req.SetResult(resp)
+		}
+		var e Error
+		req.SetError(&e)
+		res, err := req.Execute(method, apiURL)
 		if err != nil {
 			return nil, err
 		}
-		return d.request(url, method, callback, resp)
-	}
-	if res.StatusCode() < 200 || res.StatusCode() >= 300 {
-		if e.Error.Code != 0 {
-			return nil, fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+		if (res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401) && attempt == 0 {
+			if err = d.refreshTokenIfNeeded(token); err != nil {
+				return nil, err
+			}
+			continue
 		}
-		return nil, fmt.Errorf("request failed with HTTP %d: %s", res.StatusCode(), res.String())
+		if res.StatusCode() < 200 || res.StatusCode() >= 300 {
+			if e.Error.Code != 0 {
+				return nil, fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+			}
+			return nil, fmt.Errorf("request failed with HTTP %d: %s", res.StatusCode(), res.String())
+		}
+		return res.Body(), nil
 	}
-	return res.Body(), nil
+	return nil, fmt.Errorf("request failed after token refresh retry")
 }
 
-func (d *GoogleDrive) getFiles(id string) ([]File, error) {
+func (d *GoogleDrive) getFiles(ctx context.Context, id string) ([]File, error) {
 	pageToken := "first"
 	res := make([]File, 0)
 	for pageToken != "" {
@@ -107,7 +148,7 @@ func (d *GoogleDrive) getFiles(id string) ([]File, error) {
 			//"supportsAllDrives":         "true",
 			"pageToken": pageToken,
 		}
-		_, err := d.request("https://www.googleapis.com/drive/v3/files", http.MethodGet, func(req *resty.Request) {
+		_, err := d.requestWithContext(ctx, "https://www.googleapis.com/drive/v3/files", http.MethodGet, func(req *resty.Request) {
 			req.SetQueryParams(query)
 		}, &resp)
 		if err != nil {
@@ -131,7 +172,7 @@ func (d *GoogleDrive) getFiles(id string) ([]File, error) {
 
 		// Batch get target file info (only for file shortcuts)
 		if len(shortcutTargetIds) > 0 {
-			targetFiles := d.batchGetTargetFilesInfo(shortcutTargetIds)
+			targetFiles := d.batchGetTargetFilesInfo(ctx, shortcutTargetIds)
 			// Update shortcut file info
 			for j, targetId := range shortcutTargetIds {
 				if targetFile, exists := targetFiles[targetId]; exists {
@@ -158,13 +199,13 @@ func (d *GoogleDrive) getFiles(id string) ([]File, error) {
 }
 
 // getTargetFileInfo gets target file details for shortcuts
-func (d *GoogleDrive) getTargetFileInfo(targetId string) (File, error) {
+func (d *GoogleDrive) getTargetFileInfo(ctx context.Context, targetId string) (File, error) {
 	var targetFile File
-	url := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s", targetId)
+	apiURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s", url.PathEscape(targetId))
 	query := map[string]string{
 		"fields": FileInfoFields,
 	}
-	_, err := d.request(url, http.MethodGet, func(req *resty.Request) {
+	_, err := d.requestWithContext(ctx, apiURL, http.MethodGet, func(req *resty.Request) {
 		req.SetQueryParams(query)
 	}, &targetFile)
 	if err != nil {
@@ -174,7 +215,7 @@ func (d *GoogleDrive) getTargetFileInfo(targetId string) (File, error) {
 }
 
 // batchGetTargetFilesInfo batch gets target file info, sequential processing to avoid concurrency complexity
-func (d *GoogleDrive) batchGetTargetFilesInfo(targetIds []string) map[string]File {
+func (d *GoogleDrive) batchGetTargetFilesInfo(ctx context.Context, targetIds []string) map[string]File {
 	if len(targetIds) == 0 {
 		return make(map[string]File)
 	}
@@ -182,7 +223,10 @@ func (d *GoogleDrive) batchGetTargetFilesInfo(targetIds []string) map[string]Fil
 	result := make(map[string]File)
 	// Sequential processing to avoid concurrency complexity
 	for _, targetId := range targetIds {
-		file, err := d.getTargetFileInfo(targetId)
+		if ctx != nil && ctx.Err() != nil {
+			break
+		}
+		file, err := d.getTargetFileInfo(ctx, targetId)
 		if err == nil {
 			result[targetId] = file
 		}
@@ -222,8 +266,9 @@ func (d *GoogleDrive) waitForCompletion(ctx context.Context, uploadUrl string, t
 		if err != nil {
 			return err
 		}
+		token := d.getAccessToken()
 		req.ContentLength = 0
-		req.Header.Set("Authorization", "Bearer "+d.AccessToken)
+		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Range", fmt.Sprintf("bytes */%d", totalSize))
 
 		res, err := base.HttpClient.Do(req)
@@ -255,7 +300,7 @@ func (d *GoogleDrive) waitForCompletion(ctx context.Context, uploadUrl string, t
 				continue
 			}
 		case http.StatusUnauthorized:
-			if refErr := d.refreshToken(); refErr != nil {
+			if refErr := d.refreshTokenIfNeeded(token); refErr != nil {
 				return refErr
 			}
 			select {
@@ -269,6 +314,22 @@ func (d *GoogleDrive) waitForCompletion(ctx context.Context, uploadUrl string, t
 		}
 	}
 	return fmt.Errorf("upload stalled: all %d bytes sent to server, but final HTTP 200/201 completion not confirmed after %d attempts", totalSize, maxAttempts)
+}
+
+type chunkAttemptReader struct {
+	mu        *sync.Mutex
+	rs        io.ReadSeeker
+	activeGen *int
+	gen       int
+}
+
+func (r *chunkAttemptReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if *r.activeGen != r.gen {
+		return 0, io.EOF
+	}
+	return r.rs.Read(p)
 }
 
 func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, rawUrl string, up driver.UpdateProgress) error {
@@ -289,7 +350,7 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 			return err
 		}
 		req.ContentLength = 0
-		req.Header.Set("Authorization", "Bearer "+d.AccessToken)
+		req.Header.Set("Authorization", "Bearer "+d.getAccessToken())
 		req.Header.Set("Content-Range", "bytes */0")
 
 		res, err := base.HttpClient.Do(req)
@@ -334,38 +395,59 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 
 		curOffset := chunkStart
 		noProgressCount := 0
+		var readerMu sync.Mutex
+		activeGen := 0
+		freeReader := func() {
+			readerMu.Lock()
+			activeGen++
+			readerMu.Unlock()
+			ss.FreeSectionReader(reader)
+		}
 
 		// Upload bytes within this chunk until the entire chunk is confirmed or upload finishes
 		for curOffset < chunkEnd && !completed {
 			if utils.IsCanceled(ctx) {
-				ss.FreeSectionReader(reader)
+				freeReader()
 				return ctx.Err()
 			}
 
-			// Seek within reader to current unconfirmed offset
+			// Seek within reader to current unconfirmed offset while invalidating any stale
+			// http.Transport writeLoop still draining the previous attempt's body reader.
 			relOffset := curOffset - chunkStart
-			if _, err := reader.Seek(relOffset, io.SeekStart); err != nil {
-				ss.FreeSectionReader(reader)
-				return fmt.Errorf("seek reader failed: %w", err)
+			readerMu.Lock()
+			activeGen++
+			gen := activeGen
+			_, seekErr := reader.Seek(relOffset, io.SeekStart)
+			readerMu.Unlock()
+			if seekErr != nil {
+				freeReader()
+				return fmt.Errorf("seek reader failed: %w", seekErr)
 			}
 
 			sendLen := chunkEnd - curOffset
-			limitedReader := driver.NewLimitedUploadStream(ctx, io.LimitReader(reader, sendLen))
+			attemptReader := &chunkAttemptReader{
+				mu:        &readerMu,
+				rs:        reader,
+				activeGen: &activeGen,
+				gen:       gen,
+			}
+			limitedReader := driver.NewLimitedUploadStream(ctx, io.LimitReader(attemptReader, sendLen))
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadUrl, limitedReader)
 			if err != nil {
-				ss.FreeSectionReader(reader)
+				freeReader()
 				return err
 			}
+			usedToken := d.getAccessToken()
 			req.ContentLength = sendLen
-			req.Header.Set("Authorization", "Bearer "+d.AccessToken)
+			req.Header.Set("Authorization", "Bearer "+usedToken)
 			req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", curOffset, chunkEnd-1, totalSize))
 
 			res, err := base.HttpClient.Do(req)
 			if err != nil {
 				noProgressCount++
 				if noProgressCount >= 5 {
-					ss.FreeSectionReader(reader)
+					freeReader()
 					return fmt.Errorf("upload chunk network error: %w", err)
 				}
 				time.Sleep(time.Duration(noProgressCount) * 100 * time.Millisecond)
@@ -375,7 +457,7 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 			bytes, readErr := io.ReadAll(res.Body)
 			res.Body.Close()
 			if readErr != nil {
-				ss.FreeSectionReader(reader)
+				freeReader()
 				return fmt.Errorf("read response body failed: %w", readErr)
 			}
 
@@ -404,12 +486,12 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 					// Strictly no progress made. Do NOT guess!
 					noProgressCount++
 					if noProgressCount >= 5 {
-						ss.FreeSectionReader(reader)
+						freeReader()
 						return fmt.Errorf("upload stalled: server returned HTTP 308 without progress (Range: %q, current: %d)", rangeHeader, curOffset)
 					}
 					select {
 					case <-ctx.Done():
-						ss.FreeSectionReader(reader)
+						freeReader()
 						return ctx.Err()
 					case <-time.After(time.Duration(noProgressCount) * 100 * time.Millisecond):
 					}
@@ -419,7 +501,7 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 					if confirmed >= totalSize {
 						// All bytes uploaded to server, but server responded with 308 instead of 200/201.
 						// Transition to dedicated completion query loop without resending data.
-						ss.FreeSectionReader(reader)
+						freeReader()
 						return d.waitForCompletion(ctx, uploadUrl, totalSize, up)
 					} else if confirmed >= chunkEnd {
 						// Entire chunk confirmed!
@@ -438,13 +520,13 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 				}
 
 			case http.StatusUnauthorized:
-				if refErr := d.refreshToken(); refErr != nil {
-					ss.FreeSectionReader(reader)
+				if refErr := d.refreshTokenIfNeeded(usedToken); refErr != nil {
+					freeReader()
 					return refErr
 				}
 				noProgressCount++
 				if noProgressCount >= 5 {
-					ss.FreeSectionReader(reader)
+					freeReader()
 					return fmt.Errorf("token refresh retry exceeded")
 				}
 
@@ -452,8 +534,8 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 				var e Error
 				if jsonErr := utils.Json.Unmarshal(bytes, &e); jsonErr == nil && e.Error.Code != 0 {
 					if e.Error.Code == 401 {
-						if refErr := d.refreshToken(); refErr != nil {
-							ss.FreeSectionReader(reader)
+						if refErr := d.refreshTokenIfNeeded(usedToken); refErr != nil {
+							freeReader()
 							return refErr
 						}
 						noProgressCount++
@@ -461,15 +543,15 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 							continue
 						}
 					}
-					ss.FreeSectionReader(reader)
+					freeReader()
 					return fmt.Errorf("upload chunk failed (HTTP %d): %s (%v)", res.StatusCode, e.Error.Message, e.Error.Errors)
 				}
-				ss.FreeSectionReader(reader)
+				freeReader()
 				return fmt.Errorf("upload chunk failed with HTTP %d: %s", res.StatusCode, string(bytes))
 			}
 		}
 
-		ss.FreeSectionReader(reader)
+		freeReader()
 	}
 
 	if !completed {
@@ -483,9 +565,8 @@ func (d *GoogleDrive) getAbout(ctx context.Context) (*AboutResp, error) {
 		"fields": "storageQuota",
 	}
 	var resp AboutResp
-	_, err := d.request("https://www.googleapis.com/drive/v3/about", http.MethodGet, func(req *resty.Request) {
+	_, err := d.requestWithContext(ctx, "https://www.googleapis.com/drive/v3/about", http.MethodGet, func(req *resty.Request) {
 		req.SetQueryParams(query)
-		req.SetContext(ctx)
 	}, &resp)
 	if err != nil {
 		return nil, err

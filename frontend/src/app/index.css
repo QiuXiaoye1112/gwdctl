@@ -59,3 +59,57 @@
 .hope-notification__list > div {
   justify-content: center !important;
 }
+
+.filename-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filename-scrollable {
+  white-space: nowrap;
+  overflow-x: auto;
+  text-overflow: clip;
+  scrollbar-width: none;
+}
+
+.filename-scrollable::-webkit-scrollbar {
+  display: none;
+}
+
+.filename-multi-line {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: visible;
+}
+
+.folder-grid-thumb {
+  max-height: 100%;
+  max-width: 100%;
+  border-radius: var(--hope-radii-lg);
+  box-shadow: var(--hope-shadows-md);
+  object-fit: contain;
+}
+
+@keyframes folder-view-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.folder-view-enter {
+  transform-origin: center top;
+  animation: folder-view-pop 0.24s cubic-bezier(0.34, 1.35, 0.64, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-view-enter {
+    animation: none;
+  }
+}

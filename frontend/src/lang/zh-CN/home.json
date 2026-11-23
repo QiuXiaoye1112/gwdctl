@@ -6,9 +6,16 @@
     "pieces": "{{count}} 个分片，每片 {{size}}"
   },
   "obj": {
-    "name": "名称",
+    "name": "首字母",
     "size": "大小",
     "modified": "修改时间",
+    "created": "时间",
+    "sort_name": "首字母",
+    "sort_size": "大小",
+    "sort_created": "时间",
+    "sort_name_tip": "按首字母排序（a上z下、0上9下 / 倒序）",
+    "sort_size_tip": "按大小排序（大上小下 / 小上大下）",
+    "sort_created_tip": "按创建时间排序（新上旧下 / 旧上新下）",
     "count": {
       "count": "共有 {{folders}} 个文件夹，{{files}} 个文件",
       "count_folders": "共有 {{folders}} 个文件夹",

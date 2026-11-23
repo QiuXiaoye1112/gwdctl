@@ -26,6 +26,8 @@ export const Copy = () => {
   const t = useT()
   const { isOpen, onOpen, onClose } = createDisclosure()
   const [loading, ok] = useFetch(fsCopy)
+  const [submitting, setSubmitting] = createSignal(false)
+  const busy = () => loading() || submitting()
   const { pathname } = useRouter()
   const { refresh } = usePath()
   const [overwrite, setOverwrite] = createSignal(false)
@@ -50,12 +52,13 @@ export const Copy = () => {
       header={t("home.toolbar.choose_dst_folder")}
       opened={isOpen()}
       onClose={onClose}
-      loading={loading()}
+      loading={busy()}
       headerSlot={(handler) => <CreateFolderButton handler={handler} />}
       footerSlot={
         <VStack w="$full" spacing="$2">
           <Checkbox
             mr="auto"
+            disabled={busy()}
             checked={overwrite()}
             onChange={() => {
               const curOverwrite = !overwrite()
@@ -74,7 +77,7 @@ export const Copy = () => {
             onChange={() => {
               setSkipExisting(!skipExisting())
             }}
-            disabled={overwrite() || merge()}
+            disabled={busy() || overwrite() || merge()}
           >
             {t("home.conflict_policy.skip_existing")}
           </Checkbox>
@@ -84,30 +87,41 @@ export const Copy = () => {
             onChange={() => {
               setMerge(!merge())
             }}
-            disabled={overwrite() || skipExisting()}
+            disabled={busy() || overwrite() || skipExisting()}
           >
             {t("home.conflict_policy.merge")}
           </Checkbox>
         </VStack>
       }
       onSubmit={async (dst) => {
+        if (busy()) return
         const src = pathname()
         const names = selectedObjs().map((obj) => obj.name)
         const ov = overwrite()
         const skip = skipExisting()
         const mg = merge()
-        onClose()
-        const resp = await ok(src, dst, names, ov, skip, mg, false)
-        handleRespWithNotifySuccess(resp, () => {
-          const taskIds =
-            resp.data?.tasks?.map((task) => task.id).filter(Boolean) ?? []
-          if (taskIds.length > 0) {
-            bus.emit("track_tasks", { type: "copy", ids: taskIds })
-          } else {
-            bus.emit("tool", "tasks_refresh")
-            refresh(false, true)
+        setSubmitting(true)
+        try {
+          const resp = await ok(src, dst, names, ov, skip, mg, false)
+          let succeeded = false
+          handleRespWithNotifySuccess(resp, () => {
+            succeeded = true
+          })
+          if (succeeded) {
+            const taskIds =
+              resp.data?.tasks?.map((task) => task.id).filter(Boolean) ?? []
+            if (taskIds.length > 0) {
+              onClose()
+              bus.emit("track_tasks", { type: "copy", ids: taskIds })
+            } else {
+              bus.emit("tool", "tasks_refresh")
+              await refresh(false, true)
+              onClose()
+            }
           }
-        })
+        } finally {
+          setSubmitting(false)
+        }
       }}
     />
   )
@@ -117,6 +131,8 @@ export const Move = () => {
   const t = useT()
   const { isOpen, onOpen, onClose } = createDisclosure()
   const [loading, ok] = useFetch(fsMove)
+  const [submitting, setSubmitting] = createSignal(false)
+  const busy = () => loading() || submitting()
   const { pathname } = useRouter()
   const { refresh } = usePath()
   const [overwrite, setOverwrite] = createSignal(false)
@@ -139,12 +155,13 @@ export const Move = () => {
       header={t("home.toolbar.choose_dst_folder")}
       opened={isOpen()}
       onClose={onClose}
-      loading={loading()}
+      loading={busy()}
       headerSlot={(handler) => <CreateFolderButton handler={handler} />}
       footerSlot={
         <VStack w="$full" spacing="$2">
           <Checkbox
             mr="auto"
+            disabled={busy()}
             checked={overwrite()}
             onChange={() => {
               const curOverwrite = !overwrite()
@@ -162,29 +179,40 @@ export const Move = () => {
             onChange={() => {
               setSkipExisting(!skipExisting())
             }}
-            disabled={overwrite()}
+            disabled={busy() || overwrite()}
           >
             {t("home.conflict_policy.skip_existing")}
           </Checkbox>
         </VStack>
       }
       onSubmit={async (dst) => {
+        if (busy()) return
         const src = pathname()
         const names = selectedObjs().map((obj) => obj.name)
         const ov = overwrite()
         const skip = skipExisting()
-        onClose()
-        const resp = await ok(src, dst, names, ov, skip, false)
-        handleRespWithNotifySuccess(resp, () => {
-          const taskIds =
-            resp.data?.tasks?.map((task) => task.id).filter(Boolean) ?? []
-          if (taskIds.length > 0) {
-            bus.emit("track_tasks", { type: "move", ids: taskIds })
-          } else {
-            bus.emit("tool", "tasks_refresh")
-            refresh(false, true)
+        setSubmitting(true)
+        try {
+          const resp = await ok(src, dst, names, ov, skip, false)
+          let succeeded = false
+          handleRespWithNotifySuccess(resp, () => {
+            succeeded = true
+          })
+          if (succeeded) {
+            const taskIds =
+              resp.data?.tasks?.map((task) => task.id).filter(Boolean) ?? []
+            if (taskIds.length > 0) {
+              onClose()
+              bus.emit("track_tasks", { type: "move", ids: taskIds })
+            } else {
+              bus.emit("tool", "tasks_refresh")
+              await refresh(false, true)
+              onClose()
+            }
           }
-        })
+        } finally {
+          setSubmitting(false)
+        }
       }}
     />
     // <CenterIcon tip="move" viewBox="0 0 1024 1024" fill="currentColor">

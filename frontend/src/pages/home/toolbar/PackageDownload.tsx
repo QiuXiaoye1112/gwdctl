@@ -84,9 +84,6 @@ const PackageDownload = (props: { onClose: () => void }) => {
     if (!saveName) {
       saveName = t("manage.sidemenu.home")
     }
-    let fileStream = streamSaver.createWriteStream(`${saveName}.zip`, {
-      size: totalSize,
-    })
     setCur(t("home.package_download.fetching_struct"))
     setStatus(2)
     const downFiles: File[] = []
@@ -100,6 +97,14 @@ const PackageDownload = (props: { onClose: () => void }) => {
         downFiles.push(...res)
       }
     }
+    if (downFiles.length === 0) {
+      setCur(t("home.package_download.failed"))
+      setStatus(1)
+      return
+    }
+    const fileStream = streamSaver.createWriteStream(`${saveName}.zip`, {
+      size: totalSize > 0 ? totalSize : undefined,
+    })
     setCur(t("home.package_download.downloading"))
     setStatus(3)
     let fileArr = downFiles.values()

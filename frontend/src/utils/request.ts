@@ -18,8 +18,10 @@ const instance = axios.create({
 
 instance.interceptors.request.use(
   (config) => {
-    // Record user activity on API requests
-    recordUserActivity()
+    // Record user activity on API requests unless explicitly marked as background polling
+    if (!(config as any).skipActivity) {
+      recordUserActivity()
+    }
     return config
   },
   (error) => {

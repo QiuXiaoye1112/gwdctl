@@ -9,6 +9,13 @@
     "name": "Name",
     "size": "Size",
     "modified": "Modified",
+    "created": "Time",
+    "sort_name": "Name",
+    "sort_size": "Size",
+    "sort_created": "Time",
+    "sort_name_tip": "Sort by name (A-Z, 0-9 / reverse)",
+    "sort_size_tip": "Sort by size (largest / smallest)",
+    "sort_created_tip": "Sort by created time (newest / oldest)",
     "count": {
       "count": "{{folders}} folders, {{files}} files in total",
       "count_folders": "{{folders}} folders in total",

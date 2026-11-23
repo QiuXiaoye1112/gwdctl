@@ -76,31 +76,11 @@ export const Right = () => {
                 }}
               />
               <RightIcon
-                as={operations.new_file.icon}
-                tips="new_file"
-                onClick={() => {
-                  bus.emit("tool", "new_file")
-                }}
-              />
-              <RightIcon
                 as={operations.mkdir.icon}
                 p="$1_5"
                 tips="mkdir"
                 onClick={() => {
                   bus.emit("tool", "mkdir")
-                }}
-              />
-            </Show>
-            <Show
-              when={
-                isFolder() && !isShare() && userCan("move") && objStore.write
-              }
-            >
-              <RightIcon
-                as={operations.recursive_move.icon}
-                tips="recursive_move"
-                onClick={() => {
-                  bus.emit("tool", "recursiveMove")
                 }}
               />
             </Show>

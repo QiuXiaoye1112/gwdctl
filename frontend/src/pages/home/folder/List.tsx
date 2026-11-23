@@ -1,95 +1,69 @@
 import { HStack, VStack, Text } from "@hope-ui/solid"
-import { batch, createEffect, createSignal, For, Show, onMount } from "solid-js"
-import { useT, useRouter } from "~/hooks"
+import { createMemo, createSignal, For, Show } from "solid-js"
+import { useContextMenu } from "solid-contextmenu"
+import { usePath, useRouter, useT, useUtil } from "~/hooks"
 import {
   allChecked,
   checkboxOpen,
-  countMsg,
+  dirSort,
+  getMainColor,
   isIndeterminate,
   local,
   objStore,
+  OrderBy,
   selectAll,
   selectedMsg,
-  sortObjs,
+  toggleDirSort,
 } from "~/store"
-import { OrderBy } from "~/store"
-import { Col, cols, ListItem } from "./ListItem"
+import { nextSortState, sortArrowFor } from "~/utils/sort"
+import { cols, FolderItemActions, ListItem } from "./ListItem"
 import { ItemCheckbox, useSelectWithMouse } from "./helper"
 import { bus } from "~/utils"
 
-export interface SortState {
-  orderBy: string
-  reverse: boolean
-}
-
-const SORT_KEY_PREFIX = "dir_sort_"
-
-export function saveSortState(dir: string, state: SortState) {
-  try {
-    localStorage.setItem(`${SORT_KEY_PREFIX}${dir}`, JSON.stringify(state))
-  } catch (err) {
-    console.warn("failed to save sort config:", err)
-  }
-}
-
-export function loadSortState(dir: string): SortState | null {
-  try {
-    const item = localStorage.getItem(`${SORT_KEY_PREFIX}${dir}`)
-    if (!item) return null
-    return JSON.parse(item) as SortState
-  } catch (err) {
-    console.warn("failed to read sort config:", err)
-    return null
-  }
-}
-
 export const ListTitle = (props: {
-  sortCallback: (orderBy: OrderBy, reverse?: boolean) => void
+  sortCallback?: (orderBy: OrderBy, reverse?: boolean) => void
   disableCheckbox?: boolean
-  initialOrder?: OrderBy
-  initialReverse?: boolean
+  orderBy?: OrderBy
+  reverse?: boolean
+  onSort?: (orderBy: OrderBy) => void
 }) => {
   const t = useT()
-  const { pathname } = useRouter()
 
-  const [orderBy, setOrderBy] = createSignal<OrderBy | undefined>(
-    props.initialOrder,
-  )
-  const [reverse, setReverse] = createSignal(props.initialReverse ?? false)
+  const [localOrderBy, setLocalOrderBy] = createSignal<OrderBy | undefined>()
+  const [localReverse, setLocalReverse] = createSignal(false)
 
-  createEffect(() => {
-    if (props.initialOrder !== undefined) {
-      setOrderBy(props.initialOrder)
-      setReverse(props.initialReverse ?? false)
+  const activeOrderBy = () =>
+    props.onSort ? props.orderBy : localOrderBy()
+  const activeReverse = () =>
+    props.onSort ? !!props.reverse : localReverse()
+
+  const handleSort = (colName: OrderBy) => {
+    if (props.onSort) {
+      props.onSort(colName)
+      return
     }
-  })
-
-  createEffect(() => {
-    if (orderBy()) {
-      saveSortState(pathname(), { orderBy: orderBy()!, reverse: reverse() })
-      props.sortCallback(orderBy()!, reverse())
-    }
-  })
-
-  const itemProps = (col: Col) => {
-    return {
-      fontWeight: "bold",
-      fontSize: "$sm",
-      color: "$neutral11",
-      textAlign: col.textAlign as any,
-      cursor: "pointer",
-      onClick: () => {
-        if (col.name === orderBy()) {
-          setReverse(!reverse())
-        } else {
-          batch(() => {
-            setOrderBy(col.name as OrderBy)
-            setReverse(false)
-          })
-        }
-      },
-    }
+    const cur = localOrderBy()
+    const next = cur
+      ? nextSortState({ orderBy: cur, reverse: localReverse() }, colName)
+      : { orderBy: colName, reverse: false }
+    setLocalOrderBy(next.orderBy)
+    setLocalReverse(next.reverse)
+    props.sortCallback?.(next.orderBy, next.reverse)
   }
+
+  const timeColOrder = (): OrderBy => (props.onSort ? "created" : "modified")
+
+  const colLabel = (colName: OrderBy) => {
+    const label = t(`home.obj.${colName}`)
+    if (activeOrderBy() === colName) {
+      return `${label} ${sortArrowFor(colName, activeReverse())}`
+    }
+    return label
+  }
+
+  const colColor = (colName: OrderBy) =>
+    activeOrderBy() === colName ? getMainColor() : "$neutral11"
+
   return (
     <HStack class="title" w="$full" p="$2">
       <HStack w={cols[0].w} spacing="$1">
@@ -102,43 +76,99 @@ export const ListTitle = (props: {
             }}
           />
         </Show>
-        {selectedMsg() ? (
-          <Text {...itemProps(cols[0])}>{selectedMsg()}</Text>
-        ) : (
-          <Text {...itemProps(cols[0])}>{t(`home.obj.${cols[0].name}`)}</Text>
-        )}
+        <Show
+          when={selectedMsg()}
+          fallback={
+            <Text
+              fontWeight="bold"
+              fontSize="$sm"
+              color={colColor(cols[0].name)}
+              textAlign={cols[0].textAlign as any}
+              cursor="pointer"
+              userSelect="none"
+              onClick={() => handleSort(cols[0].name)}
+            >
+              {colLabel(cols[0].name)}
+            </Text>
+          }
+        >
+          <Text
+            fontWeight="bold"
+            fontSize="$sm"
+            color="$neutral11"
+            textAlign={cols[0].textAlign as any}
+          >
+            {selectedMsg()}
+          </Text>
+        </Show>
       </HStack>
-      <Text w={cols[1].w} {...itemProps(cols[1])}>
-        {t(`home.obj.${cols[1].name}`)}
+      <Text
+        w={cols[1].w}
+        fontWeight="bold"
+        fontSize="$sm"
+        color={colColor(cols[1].name)}
+        textAlign={cols[1].textAlign as any}
+        cursor="pointer"
+        userSelect="none"
+        onClick={() => handleSort(cols[1].name)}
+      >
+        {colLabel(cols[1].name)}
       </Text>
       <Text
         w={cols[2].w}
-        {...itemProps(cols[2])}
+        fontWeight="bold"
+        fontSize="$sm"
+        color={colColor(timeColOrder())}
+        textAlign={cols[2].textAlign as any}
+        cursor="pointer"
+        userSelect="none"
+        onClick={() => handleSort(timeColOrder())}
         display={{ "@initial": "none", "@md": "inline" }}
       >
-        {t(`home.obj.${cols[2].name}`)}
+        {colLabel(timeColOrder())}
       </Text>
     </HStack>
   )
 }
 
+const getFilenameClass = () => {
+  switch (local["list_item_filename_overflow"]) {
+    case "multi_line":
+      return "filename-multi-line"
+    case "scrollable":
+      return "filename-scrollable"
+    default:
+      return "filename-ellipsis"
+  }
+}
+
 const ListLayout = () => {
-  const { pathname } = useRouter()
+  const { pushHref, to } = useRouter()
+  const { isHide } = useUtil()
+  const { setPathAs } = usePath()
+  const { show: showContextMenu } = useContextMenu({ id: 1 })
 
-  const [initialOrder, setInitialOrder] = createSignal<OrderBy>()
-  const [initialReverse, setInitialReverse] = createSignal(false)
-
-  const { registerSelectContainer, captureContentMenu } = useSelectWithMouse()
+  const {
+    registerSelectContainer,
+    captureContentMenu,
+    openWithDoubleClick,
+    toggleWithClick,
+    restoreSelectionCache,
+  } = useSelectWithMouse()
   registerSelectContainer()
 
-  onMount(() => {
-    const saved = loadSortState(pathname())
-    if (saved) {
-      setInitialOrder(saved.orderBy as OrderBy)
-      setInitialReverse(saved.reverse)
-      sortObjs(saved.orderBy as OrderBy, saved.reverse)
-    }
-  })
+  const filenameClass = createMemo(getFilenameClass)
+  const actions: FolderItemActions = {
+    isHide,
+    setPathAs,
+    showContextMenu,
+    pushHref,
+    to,
+    openWithDoubleClick,
+    toggleWithClick,
+    restoreSelectionCache,
+    filenameClass,
+  }
 
   const onDragOver = (e: DragEvent) => {
     const items = Array.from(e.dataTransfer?.items ?? [])
@@ -156,25 +186,20 @@ const ListLayout = () => {
     <VStack
       onDragOver={onDragOver}
       oncapture:contextmenu={captureContentMenu}
-      class="list viselect-container"
+      class="list viselect-container folder-view-enter"
       w="$full"
       spacing="$1"
     >
       <ListTitle
-        sortCallback={sortObjs}
-        initialOrder={initialOrder()}
-        initialReverse={initialReverse()}
+        orderBy={dirSort().orderBy}
+        reverse={dirSort().reverse}
+        onSort={toggleDirSort}
       />
       <For each={objStore.objs}>
         {(obj, i) => {
-          return <ListItem obj={obj} index={i()} />
+          return <ListItem obj={obj} index={i()} actions={actions} />
         }}
       </For>
-      <Show when={local["show_count_msg"] === "visible"}>
-        <Text size="sm" color="$neutral11">
-          {countMsg()}
-        </Text>
-      </Show>
     </VStack>
   )
 }

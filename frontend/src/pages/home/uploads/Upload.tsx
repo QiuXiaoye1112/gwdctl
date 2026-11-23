@@ -35,17 +35,45 @@ export const [uploadFiles, setUploadFiles] = createStore<{
 })
 
 const abortControllers = new Map<string, AbortController>()
+const canceledPaths = new Set<string>()
 
-export const cancelUpload = (path: string) => {
-  const controller = abortControllers.get(path)
+const uploadKeyOf = (u: UploadFileProps) => u.fullPath || u.path
+
+export const cancelUpload = (key: string) => {
+  canceledPaths.add(key)
+  const controller = abortControllers.get(key)
   if (controller) {
     controller.abort()
-    abortControllers.delete(path)
+    abortControllers.delete(key)
   }
-  setUploadFiles("uploads", (uploads) => uploads.filter((u) => u.path !== path))
+  setUploadFiles("uploads", (uploads) =>
+    uploads.filter((u) => uploadKeyOf(u) !== key),
+  )
   bus.emit("tool", "tasks_refresh")
   notify.info(
     localStorage.getItem("lang") === "en" ? "Upload canceled" : "已取消上传",
+  )
+}
+
+export const cancelAllUploads = () => {
+  const activeKeys = uploadFiles.uploads
+    .filter((u) => !["success", "error"].includes(u.status))
+    .map((u) => uploadKeyOf(u))
+  if (activeKeys.length === 0) return
+  for (const key of activeKeys) {
+    canceledPaths.add(key)
+    const controller = abortControllers.get(key)
+    if (controller) {
+      controller.abort()
+      abortControllers.delete(key)
+    }
+  }
+  setUploadFiles("uploads", [])
+  bus.emit("tool", "tasks_refresh")
+  notify.info(
+    localStorage.getItem("lang") === "en"
+      ? `Canceled ${activeKeys.length} uploads`
+      : `已取消 ${activeKeys.length} 个上传任务`,
   )
 }
 
@@ -96,7 +124,7 @@ const UploadFile = (props: UploadFileProps & { onRetry?: () => void }) => {
               size="xs"
               colorScheme="danger"
               variant="subtle"
-              onClick={() => cancelUpload(props.path)}
+              onClick={() => cancelUpload(uploadKeyOf(props))}
             >
               {localStorage.getItem("lang") === "en" ? "Cancel" : "取消"}
             </Button>
@@ -131,9 +159,14 @@ const Upload = () => {
   }
   let fileInput!: HTMLInputElement
   let folderInput!: HTMLInputElement
-  const fileMap = new Map<string, File>()
-  const setUpload = (path: string, key: keyof UploadFileProps, value: any) => {
-    setUploadFiles("uploads", (upload) => upload.path === path, key, value)
+  const fileMap = new Map<string, { file: File; baseDir: string }>()
+  const setUpload = (key: string, field: keyof UploadFileProps, value: any) => {
+    setUploadFiles(
+      "uploads",
+      (upload) => uploadKeyOf(upload) === key,
+      field,
+      value,
+    )
   }
 
   const uploaders = getUploads()
@@ -146,19 +179,23 @@ const Upload = () => {
     uploader: ReturnType<typeof getUploads>[0],
     asTask: boolean,
     overwrite: boolean,
-  ) => {
-    const path = file.webkitRelativePath ? file.webkitRelativePath : file.name
-    setUpload(path, "status", "uploading")
-    const uploadPath = pathJoin(baseDir, path)
+  ): Promise<boolean> => {
+    const relPath = file.webkitRelativePath ? file.webkitRelativePath : file.name
+    const uploadPath = pathJoin(baseDir, relPath)
+    if (canceledPaths.has(uploadPath)) {
+      canceledPaths.delete(uploadPath)
+      return false
+    }
+    setUpload(uploadPath, "status", "uploading")
     const controller = new AbortController()
-    abortControllers.set(path, controller)
+    abortControllers.set(uploadPath, controller)
     try {
       const err = await uploader
         .upload(
           uploadPath,
           file,
           (key, value) => {
-            setUpload(path, key, value)
+            setUpload(uploadPath, key, value)
           },
           asTask,
           overwrite,
@@ -167,28 +204,35 @@ const Upload = () => {
           controller.signal,
         )
         .catch((err) => err)
-      if (controller.signal.aborted) {
-        return
+      if (controller.signal.aborted || canceledPaths.has(uploadPath)) {
+        canceledPaths.delete(uploadPath)
+        return false
       }
       if (!err) {
-        setUpload(path, "status", "success")
-        setUpload(path, "progress", 100)
-        refresh(false, true)
+        setUpload(uploadPath, "status", "success")
+        setUpload(uploadPath, "progress", 100)
+        setUpload(uploadPath, "speed", 0)
+        return true
       } else {
-        setUpload(path, "status", "error")
-        setUpload(path, "msg", err.message)
-        notify.error(`${path}: ${err.message}`)
+        setUpload(uploadPath, "status", "error")
+        setUpload(uploadPath, "speed", 0)
+        setUpload(uploadPath, "msg", err.message)
+        notify.error(`${relPath}: ${err.message}`)
+        return false
       }
     } catch (e: any) {
-      if (controller.signal.aborted) {
-        return
+      if (controller.signal.aborted || canceledPaths.has(uploadPath)) {
+        canceledPaths.delete(uploadPath)
+        return false
       }
       console.error(e)
-      setUpload(path, "status", "error")
-      setUpload(path, "msg", e.message)
-      notify.error(`${path}: ${e.message}`)
+      setUpload(uploadPath, "status", "error")
+      setUpload(uploadPath, "speed", 0)
+      setUpload(uploadPath, "msg", e.message)
+      notify.error(`${relPath}: ${e.message}`)
+      return false
     } finally {
-      abortControllers.delete(path)
+      abortControllers.delete(uploadPath)
     }
   }
 
@@ -200,39 +244,53 @@ const Upload = () => {
     const overwrite = uploadConfig.overwrite
     for (const file of files) {
       const upload = File2Upload(file)
-      fileMap.set(upload.path, file)
+      const fullPath = pathJoin(baseDir, upload.path)
+      upload.fullPath = fullPath
+      canceledPaths.delete(fullPath)
+      fileMap.set(fullPath, { file, baseDir })
       setUploadFiles("uploads", (uploads) => [
-        ...uploads.filter((u) => u.path !== upload.path),
+        ...uploads.filter((u) => uploadKeyOf(u) !== fullPath),
         upload,
       ])
     }
     bus.emit("tool", "close_upload")
     bus.emit("tool", "tasks_refresh")
-    for await (const _ of asyncPool(3, files, (f) =>
+    let anySucceeded = false
+    for await (const ok of asyncPool(3, files, (f) =>
       runFileUpload(f, baseDir, uploader, asTask, overwrite),
     )) {
-      // background upload pool
+      if (ok) anySucceeded = true
     }
-    setUploadFiles("uploads", (uploads) =>
-      uploads.filter(({ status }) => !["success", "error"].includes(status)),
-    )
+    if (
+      uploadFiles.uploads.every(({ status }) =>
+        ["success", "error"].includes(status),
+      )
+    ) {
+      setUploadFiles("uploads", [])
+    }
     bus.emit("tool", "tasks_refresh")
-    refresh(false, true)
+    if (anySucceeded && pathname() === baseDir) {
+      refresh(false, true)
+    }
   }
 
-  const retryFile = (path: string) => {
-    const file = fileMap.get(path)
-    if (!file) return
-    setUpload(path, "msg", "")
-    setUpload(path, "progress", 0)
-    setUpload(path, "speed", 0)
-    runFileUpload(
-      file,
-      pathname(),
+  const retryFile = async (key: string) => {
+    const item = fileMap.get(key)
+    if (!item) return
+    canceledPaths.delete(key)
+    setUpload(key, "msg", "")
+    setUpload(key, "progress", 0)
+    setUpload(key, "speed", 0)
+    const ok = await runFileUpload(
+      item.file,
+      item.baseDir,
       curUploader(),
       asTaskUnsupported() ? false : uploadConfig.asTask,
       uploadConfig.overwrite,
     )
+    if (ok && pathname() === item.baseDir) {
+      refresh(false, true)
+    }
   }
   return (
     <VStack w="$full" pb="$2" spacing="$2">
@@ -267,7 +325,7 @@ const Upload = () => {
               {(upload) => (
                 <UploadFile
                   {...upload}
-                  onRetry={() => retryFile(upload.path)}
+                  onRetry={() => retryFile(uploadKeyOf(upload))}
                 />
               )}
             </For>
@@ -281,7 +339,9 @@ const Upload = () => {
           display="none"
           onChange={(e) => {
             // @ts-ignore
-            handleAddFiles(Array.from(e.target.files ?? []))
+            const selected = Array.from(e.target.files ?? [])
+            e.currentTarget.value = ""
+            handleAddFiles(selected)
           }}
         />
         <Input
@@ -293,7 +353,9 @@ const Upload = () => {
           display="none"
           onChange={(e) => {
             // @ts-ignore
-            handleAddFiles(Array.from(e.target.files ?? []))
+            const selected = Array.from(e.target.files ?? [])
+            e.currentTarget.value = ""
+            handleAddFiles(selected)
           }}
         />
         <VStack

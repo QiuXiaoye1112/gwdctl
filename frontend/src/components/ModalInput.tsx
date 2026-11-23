@@ -79,6 +79,7 @@ export const ModalInput = (props: ModalInputProps) => {
   })
 
   const submit = () => {
+    if (props.loading) return
     if (props.validateFilename) {
       const validation = validateFilename(value())
       if (!validation.valid) {
@@ -92,6 +93,11 @@ export const ModalInput = (props: ModalInputProps) => {
       }
     }
     props.onSubmit?.(value())
+  }
+
+  const handleClose = () => {
+    if (props.loading) return
+    props.onClose()
   }
 
   const handleInput = (newValue: string) => {
@@ -108,7 +114,9 @@ export const ModalInput = (props: ModalInputProps) => {
     <Modal
       blockScrollOnMount={false}
       opened={props.opened}
-      onClose={props.onClose}
+      onClose={handleClose}
+      closeOnOverlayClick={!props.loading}
+      closeOnEsc={!props.loading}
       initialFocus="#modal-input"
     >
       <ModalOverlay />
@@ -124,6 +132,7 @@ export const ModalInput = (props: ModalInputProps) => {
                 id="modal-input"
                 type={props.type}
                 value={value()}
+                disabled={props.loading}
                 ref={(el) => (inputRef = el)}
                 invalid={!!validationError()}
                 onInput={(e) => {
@@ -141,6 +150,7 @@ export const ModalInput = (props: ModalInputProps) => {
             <Textarea
               id="modal-input"
               value={value()}
+              disabled={props.loading}
               ref={(el) => (inputRef = el)}
               invalid={!!validationError()}
               onInput={(e) => {
@@ -161,7 +171,11 @@ export const ModalInput = (props: ModalInputProps) => {
         </ModalBody>
         <ModalFooter display="flex" gap="$2">
           <Show when={props.footerSlot}>{props.footerSlot}</Show>
-          <Button onClick={props.onClose} colorScheme="neutral">
+          <Button
+            disabled={props.loading}
+            onClick={handleClose}
+            colorScheme="neutral"
+          >
             {t("global.cancel")}
           </Button>
           <Button loading={props.loading} onClick={() => submit()}>
