@@ -491,7 +491,7 @@ func MakeDir(ctx context.Context, storage driver.Driver, path string) error {
 	key := Key(storage, path)
 	_, err, _ := mkdirG.Do(key, func() (any, error) {
 		parentPath, dirName := stdpath.Split(path)
-		_, parentCachedBefore := Cache.dirCache.Get(Key(storage, parentPath))
+		parentDC, parentCachedBefore := Cache.dirCache.Get(Key(storage, parentPath))
 		// check if dir exists
 		f, err := Get(ctx, storage, path)
 		if err == nil {
@@ -504,7 +504,7 @@ func MakeDir(ctx context.Context, storage driver.Driver, path string) error {
 			return nil, errors.WithMessage(err, "failed to check if dir exists")
 		}
 		// Refresh once when parent was served from the short dirCache so recent external folders are not duplicated.
-		if parentCachedBefore && path != "/" {
+		if parentCachedBefore && !parentDC.isFreshlyCreatedLocally() && path != "/" {
 			existing, listErr := ListExistingByName(ctx, storage, parentPath, dirName)
 			if listErr != nil {
 				if !errs.IsObjectNotFound(listErr) {
@@ -548,6 +548,13 @@ func MakeDir(ctx context.Context, storage driver.Driver, path string) error {
 		}
 		if storage.Config().NoCache {
 			return nil, nil
+		}
+		duration := time.Minute * time.Duration(storage.GetStorage().CacheExpiration)
+		if duration <= 0 {
+			duration = 5 * time.Minute
+		}
+		if err == nil {
+			Cache.dirCache.SetWithTTL(key, newFreshEmptyDirectoryCache(), duration)
 		}
 		if dirCache, exist := Cache.dirCache.Get(Key(storage, parentPath)); exist {
 			if newObj == nil {
@@ -1396,4 +1403,8 @@ func wrapObjName(storage driver.Driver, obj model.Obj) model.Obj {
 		return model.WrapObjName(obj)
 	}
 	return obj
+}
+
+func DeleteLinkCache(storage driver.Driver, path string) {
+	Cache.linkCache.DeleteKey(Key(storage, utils.FixAndCleanPath(path)))
 }

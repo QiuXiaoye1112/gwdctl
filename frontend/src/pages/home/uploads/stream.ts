@@ -1,14 +1,13 @@
 import { password } from "~/store"
 import { EmptyResp } from "~/types"
 import { r } from "~/utils"
-import { seedUploadHeaders, SetUpload, Upload } from "./types"
+import { seedUploadHeaders, SetUpload, Upload, UploadOverwrite } from "./types"
 import { calculateHash } from "./util"
 export const StreamUpload: Upload = async (
   uploadPath: string,
   file: File,
   setUpload: SetUpload,
-  asTask = false,
-  overwrite = false,
+  overwrite: UploadOverwrite = false,
   rapid = false,
   seedOptions,
   signal,
@@ -18,11 +17,10 @@ export const StreamUpload: Upload = async (
   let oldLoaded = 0
   let headers: { [k: string]: any } = {
     "File-Path": encodeURIComponent(uploadPath),
-    "As-Task": asTask,
     "Content-Type": file.type || "application/octet-stream",
     "Last-Modified": file.lastModified,
     Password: password(),
-    Overwrite: overwrite.toString(),
+    Overwrite: overwrite === "skip" ? "skip" : overwrite.toString(),
     ...seedUploadHeaders(seedOptions),
   }
   if (rapid) {

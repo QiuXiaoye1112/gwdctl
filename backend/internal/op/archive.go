@@ -11,7 +11,6 @@ import (
 
 	"github.com/OpenListTeam/OpenList/v4/internal/archive/tool"
 	"github.com/OpenListTeam/OpenList/v4/internal/cache"
-	"github.com/OpenListTeam/OpenList/v4/internal/conf"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
@@ -21,7 +20,6 @@ import (
 	gocache "github.com/OpenListTeam/go-cache"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/time/rate"
 )
 
 var (
@@ -492,73 +490,4 @@ func InternalExtract(ctx context.Context, storage driver.Driver, path string, ar
 		return nil, 0, err
 	}
 	return &streamWithParent{rc: rc, parents: ss}, size, nil
-}
-
-func ArchiveDecompress(ctx context.Context, storage driver.Driver, srcPath, dstDirPath string, args model.ArchiveDecompressArgs, lazyCache ...bool) error {
-	if storage.Config().CheckStatus && storage.GetStorage().Status != WORK {
-		return errors.WithMessagef(errs.StorageNotInit, "storage status: %s", storage.GetStorage().Status)
-	}
-	srcPath = utils.FixAndCleanPath(srcPath)
-	dstDirPath = utils.FixAndCleanPath(dstDirPath)
-	srcObj, err := GetUnwrap(ctx, storage, srcPath)
-	if err != nil {
-		return errors.WithMessage(err, "failed to get src object")
-	}
-	dstDir, err := GetUnwrap(ctx, storage, dstDirPath)
-	if err != nil {
-		return errors.WithMessage(err, "failed to get dst dir")
-	}
-
-	var newObjs []model.Obj
-	switch s := storage.(type) {
-	case driver.ArchiveDecompressResult:
-		newObjs, err = s.ArchiveDecompress(ctx, srcObj, dstDir, args)
-		if err == nil {
-			if len(newObjs) > 0 {
-				if !storage.Config().NoCache {
-					if cache, exist := Cache.dirCache.Get(Key(storage, dstDirPath)); exist {
-						for _, newObj := range newObjs {
-							cache.UpdateObject(newObj.GetName(), newObj)
-						}
-					}
-				}
-			} else if !utils.IsBool(lazyCache...) {
-				Cache.DeleteDirectory(storage, dstDirPath)
-			}
-		}
-	case driver.ArchiveDecompress:
-		err = s.ArchiveDecompress(ctx, srcObj, dstDir, args)
-		if err == nil && !utils.IsBool(lazyCache...) {
-			Cache.DeleteDirectory(storage, dstDirPath)
-		}
-	default:
-		return errs.NotImplement
-	}
-	if !utils.IsBool(lazyCache...) && err == nil && needHandleObjsUpdateHook() {
-		onlyList := false
-		targetPath := dstDirPath
-		if len(newObjs) == 1 && newObjs[0].IsDir() {
-			targetPath = stdpath.Join(dstDirPath, newObjs[0].GetName())
-		} else if len(newObjs) == 1 && !newObjs[0].IsDir() {
-			onlyList = true
-		} else if args.PutIntoNewDir {
-			targetPath = stdpath.Join(dstDirPath, strings.TrimSuffix(srcObj.GetName(), stdpath.Ext(srcObj.GetName())))
-		} else if innerBase := stdpath.Base(args.InnerPath); innerBase != "." && innerBase != "/" {
-			targetPath = stdpath.Join(dstDirPath, innerBase)
-			dstObj, e := Get(ctx, storage, targetPath)
-			onlyList = e != nil || !dstObj.IsDir()
-		}
-		if onlyList {
-			go List(context.Background(), storage, dstDirPath, model.ListArgs{Refresh: true})
-		} else {
-			var limiter *rate.Limiter
-			if l, _ := GetSettingItemByKey(conf.HandleHookRateLimit); l != nil {
-				if f, e := strconv.ParseFloat(l.Value, 64); e == nil && f > .0 {
-					limiter = rate.NewLimiter(rate.Limit(f), 1)
-				}
-			}
-			go RecursivelyListStorage(context.Background(), storage, targetPath, limiter, nil)
-		}
-	}
-	return errors.WithStack(err)
 }

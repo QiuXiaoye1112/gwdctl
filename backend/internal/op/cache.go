@@ -158,7 +158,9 @@ type directoryCache struct {
 	sorted []model.Obj
 	mu     sync.RWMutex
 
-	dirtyFlags uint8
+	dirtyFlags     uint8
+	createdLocally bool
+	createdAt      time.Time
 }
 
 const (
@@ -177,6 +179,19 @@ func newDirectoryCache(objs []model.Obj) *directoryCache {
 		objs:   objsCopy,
 		sorted: sorted,
 	}
+}
+
+func newFreshEmptyDirectoryCache() *directoryCache {
+	return &directoryCache{
+		objs:           []model.Obj{},
+		sorted:         []model.Obj{},
+		createdLocally: true,
+		createdAt:      time.Now(),
+	}
+}
+
+func (dc *directoryCache) isFreshlyCreatedLocally() bool {
+	return dc != nil && dc.createdLocally && time.Since(dc.createdAt) < 2*time.Minute
 }
 
 func (dc *directoryCache) RemoveObject(name string) {

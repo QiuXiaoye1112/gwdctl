@@ -27,21 +27,12 @@ import { Dynamic } from "solid-js/web"
 import {
   getMainColor,
   local,
-  me,
   OrderBy,
   password,
   objStore,
   ObjStore,
 } from "~/store"
-import {
-  Obj,
-  ObjTree,
-  UserMethods,
-  UserPermissions,
-  ObjType,
-  ArchiveObj,
-  Resp,
-} from "~/types"
+import { Obj, ObjTree, ObjType, ArchiveObj, Resp } from "~/types"
 import { useFetch, useRouter, useT, useUtil, useLink } from "~/hooks"
 import { ListTitle } from "~/pages/home/folder/List"
 import { cols } from "~/pages/home/folder/ListItem"
@@ -49,7 +40,6 @@ import { Error, MaybeLoading, FullLoading, SelectWrapper } from "~/components"
 import { OpenWith } from "../file/open-with"
 import { getPreviews } from "."
 import {
-  bus,
   formatDate,
   fsArchiveList,
   fsArchiveMeta,
@@ -63,7 +53,7 @@ import { useSelectWithMouse } from "~/pages/home/folder/helper"
 import { getIconByObj } from "~/utils/icon"
 import createMutex from "~/utils/mutex"
 import { Item, Menu, useContextMenu } from "solid-contextmenu"
-import { TbCopy, TbLink } from "solid-icons/tb"
+import { TbLink } from "solid-icons/tb"
 import { AiOutlineCloudDownload } from "solid-icons/ai"
 import { Operations } from "~/pages/home/toolbar/operations"
 import "solid-contextmenu/dist/style.css"
@@ -163,7 +153,6 @@ const ListItem = (props: ListItemProps) => {
 }
 
 const operations: Operations = {
-  extract: { icon: TbCopy, color: "$success9" },
   copy_link: { icon: TbLink, color: "$info9" },
   download: { icon: AiOutlineCloudDownload, color: "$primary9" },
 }
@@ -171,7 +160,6 @@ const operations: Operations = {
 const ContextMenu = () => {
   const { copy } = useUtil()
   const { colorMode } = useColorMode()
-  const { isShare } = useRouter()
   return (
     <Menu
       id={2}
@@ -198,22 +186,6 @@ const ContextMenu = () => {
         }}
       >
         <ItemContent name="copy_link" />
-      </Item>
-      <Item
-        hidden={() => {
-          const index = UserPermissions.findIndex(
-            (item) => item === "decompress",
-          )
-          return !isShare() && !UserMethods.can(me(), index)
-        }}
-        onClick={({ props }) => {
-          bus.emit(
-            "extract",
-            JSON.stringify({ inner: props.innerPath, pass: props.pass }),
-          )
-        }}
-      >
-        <ItemContent name="extract" />
       </Item>
     </Menu>
   )

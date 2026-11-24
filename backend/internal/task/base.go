@@ -16,6 +16,8 @@ type TaskExtension struct {
 	EndTime    *time.Time `json:"end_time,omitempty"`
 	TotalBytes int64
 	ApiUrl     string
+	BatchID    string `json:"batch_id,omitempty"`
+	BatchLabel string `json:"batch_label,omitempty"`
 }
 
 func (t *TaskExtension) SetCtx(ctx context.Context) {
@@ -65,6 +67,14 @@ func (t *TaskExtension) GetTotalBytes() int64 {
 	return t.TotalBytes
 }
 
+func (t *TaskExtension) GetBatchID() string {
+	return t.BatchID
+}
+
+func (t *TaskExtension) GetBatchLabel() string {
+	return t.BatchLabel
+}
+
 func (t *TaskExtension) SetRetry(retry int, maxRetry int) {
 	t.Base.SetRetry(retry, maxRetry)
 	if retry > 0 || !conf.Conf.Tasks.AllowRetryCanceled || t.Ctx() == nil {
@@ -85,4 +95,6 @@ type TaskExtensionInfo interface {
 	GetStartTime() *time.Time
 	GetEndTime() *time.Time
 	GetTotalBytes() int64
+	GetBatchID() string
+	GetBatchLabel() string
 }

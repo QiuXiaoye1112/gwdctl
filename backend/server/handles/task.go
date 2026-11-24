@@ -25,6 +25,8 @@ type TaskInfo struct {
 	EndTime     *time.Time  `json:"end_time"`
 	TotalBytes  int64       `json:"total_bytes"`
 	Error       string      `json:"error"`
+	BatchID     string      `json:"batch_id,omitempty"`
+	BatchLabel  string      `json:"batch_label,omitempty"`
 }
 
 func getTaskInfo[T task.TaskExtensionInfo](task T) TaskInfo {
@@ -55,6 +57,8 @@ func getTaskInfo[T task.TaskExtensionInfo](task T) TaskInfo {
 		EndTime:     task.GetEndTime(),
 		TotalBytes:  task.GetTotalBytes(),
 		Error:       errMsg,
+		BatchID:     task.GetBatchID(),
+		BatchLabel:  task.GetBatchLabel(),
 	}
 }
 
@@ -127,6 +131,33 @@ func taskRoute[T task.TaskExtensionInfo](g *gin.RouterGroup, manager task.Manage
 	g.POST("/cancel_some", getBatchHandler(manager, func(task T) {
 		manager.Cancel(task.GetID())
 	}))
+	g.POST("/cancel_batch", func(c *gin.Context) {
+		batchID := c.Query("batch_id")
+		if batchID == "" {
+			common.ErrorStrResp(c, "batch_id is required", 400)
+			return
+		}
+		canceledSet := make(map[string]struct{})
+		// Cancel running tasks first so recursive folder traversals stop spawning child tasks.
+		running := manager.GetByCondition(func(task T) bool {
+			return task.GetBatchID() == batchID && task.GetState() == tache.StateRunning
+		})
+		for _, t := range running {
+			id := t.GetID()
+			manager.Cancel(id)
+			canceledSet[id] = struct{}{}
+		}
+		remaining := manager.GetByCondition(func(task T) bool {
+			return task.GetBatchID() == batchID && argsContains(task.GetState(), tache.StatePending, tache.StateRunning, tache.StateCanceling,
+				tache.StateErrored, tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry)
+		})
+		for _, t := range remaining {
+			id := t.GetID()
+			manager.Cancel(id)
+			canceledSet[id] = struct{}{}
+		}
+		common.SuccessResp(c, gin.H{"canceled": len(canceledSet)})
+	})
 	g.POST("/delete_some", getBatchHandler(manager, func(task T) {
 		manager.Remove(task.GetID())
 	}))
@@ -157,9 +188,6 @@ func taskRoute[T task.TaskExtensionInfo](g *gin.RouterGroup, manager task.Manage
 }
 
 func SetupTaskRoute(g *gin.RouterGroup) {
-	taskRoute(g.Group("/upload"), fs.UploadTaskManager)
 	taskRoute(g.Group("/copy"), fs.CopyTaskManager)
 	taskRoute(g.Group("/move"), fs.MoveTaskManager)
-	taskRoute(g.Group("/decompress"), fs.ArchiveDownloadTaskManager)
-	taskRoute(g.Group("/decompress_upload"), fs.ArchiveContentUploadTaskManager)
 }

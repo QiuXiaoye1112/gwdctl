@@ -861,3 +861,24 @@ func TestRemove_StaleCacheFindsRemoteObject(t *testing.T) {
 		t.Fatalf("expected remote object %s removed once, exists=%v calls=%d", remoteID, drv.NodeExists(remoteID), drv.removeCalls.Load())
 	}
 }
+
+func TestMakeDir_FreshlyCreatedFolderSkipsRedundantList(t *testing.T) {
+	ctx := context.Background()
+	drv := setupOpTransferEnv(t, "/")
+
+	// Warm root cache.
+	if objs, err := List(ctx, drv, "/", model.ListArgs{}); err != nil || len(objs) != 0 {
+		t.Fatalf("unexpected initial list: len=%d err=%v", len(objs), err)
+	}
+	if err := MakeDir(ctx, drv, "/study1/.venv"); err != nil {
+		t.Fatalf("MakeDir /study1/.venv failed: %v", err)
+	}
+
+	drv.listCalls.Store(0)
+	if err := MakeDir(ctx, drv, "/study1/.venv/lib/python/site-packages"); err != nil {
+		t.Fatalf("MakeDir nested failed: %v", err)
+	}
+	if got := drv.listCalls.Load(); got != 0 {
+		t.Fatalf("expected 0 redundant List calls when creating children inside freshly created folders, got %d", got)
+	}
+}

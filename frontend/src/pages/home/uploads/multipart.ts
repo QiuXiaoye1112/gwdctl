@@ -1,7 +1,7 @@
 import { getSettingNumber, password } from "~/store"
 import { Resp } from "~/types"
 import { r } from "~/utils"
-import { seedUploadHeaders, SetUpload, Upload } from "./types"
+import { seedUploadHeaders, SetUpload, Upload, UploadOverwrite } from "./types"
 import { calculateHash } from "./util"
 import { StreamUpload } from "./stream"
 
@@ -69,8 +69,7 @@ export const MultipartUpload: Upload = async (
   uploadPath: string,
   file: File,
   setUpload: SetUpload,
-  _asTask = false, // sessions are synchronous pipelines; As-Task does not apply
-  overwrite = false,
+  overwrite: UploadOverwrite = false,
   rapid = false,
   seedOptions,
   signal,
@@ -85,7 +84,6 @@ export const MultipartUpload: Upload = async (
       uploadPath,
       file,
       setUpload,
-      false,
       overwrite,
       rapid,
       seedOptions,
@@ -102,7 +100,7 @@ export const MultipartUpload: Upload = async (
     "Content-Type": file.type || "application/octet-stream",
     "Last-Modified": file.lastModified,
     Password: password(),
-    Overwrite: overwrite.toString(),
+    Overwrite: overwrite === "skip" ? "skip" : overwrite.toString(),
     ...seedUploadHeaders(seedOptions),
   }
   if (rapid) {
@@ -138,6 +136,10 @@ export const MultipartUpload: Upload = async (
     throw new Error(initResp!.message)
   }
   const session = initResp!.data
+  if ((session as any)?.skipped) {
+    setUpload("progress", 100)
+    return
+  }
   // 后端不支持分片（存储驱动无会话上传能力）时返回 data:null，
   // 回退到流式上传，保证任意存储都能上传
   if (!session) {
@@ -145,7 +147,6 @@ export const MultipartUpload: Upload = async (
       uploadPath,
       file,
       setUpload,
-      false,
       overwrite,
       rapid,
       seedOptions,

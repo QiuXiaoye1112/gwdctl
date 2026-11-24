@@ -186,25 +186,15 @@ export const fsArchiveList = (
   )
 }
 
-export const fsArchiveDecompress = (
-  src_dir: string,
-  dst_dir: string,
-  name: string[],
-  archive_pass = "",
-  inner_path = "/",
-  cache_full = true,
-  put_into_new_dir = false,
-  overwrite = false,
-): PEmptyResp => {
-  return r.post("/fs/archive/decompress", {
-    src_dir,
-    dst_dir,
-    name,
-    archive_pass,
-    inner_path,
-    cache_full,
-    put_into_new_dir,
-    overwrite,
+export const fsPackageDownload = (
+  path: string,
+  names: string[],
+  password = "",
+): PResp<{ ticket: string; url: string; filename: string }> => {
+  return r.post("/fs/package_download", {
+    path,
+    names,
+    password,
   })
 }
 

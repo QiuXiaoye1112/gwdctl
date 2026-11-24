@@ -4,29 +4,27 @@ import {
   Heading,
   HStack,
   IconButton,
-  Checkbox,
   Text,
   Badge,
   Progress,
   ProgressIndicator,
   Button,
-  Box,
-  Stack,
 } from "@hope-ui/solid"
 import { createSignal, For, Show } from "solid-js"
 import { usePath, useRouter, useT } from "~/hooks"
-import { getMainColor, uploadConfig, setUploadConfig } from "~/store"
+import { getMainColor, getSettingBool, objStore, password } from "~/store"
 import {
   RiDocumentFolderUploadFill,
   RiDocumentFileUploadFill,
 } from "solid-icons/ri"
-import { bus, getFileSize, notify, pathJoin } from "~/utils"
+import { bus, fsList, fsMkdir, getFileSize, notify, pathJoin } from "~/utils"
 import { asyncPool } from "~/utils/async_pool"
 import { createStore } from "solid-js/store"
-import { UploadFileProps, StatusBadge } from "./types"
+import { UploadFileProps, StatusBadge, UploadOverwrite } from "./types"
 import { File2Upload, traverseFileTree } from "./util"
-import { SelectWrapper } from "~/components"
-import { getUploads } from "./uploads"
+import { MultipartUpload } from "./multipart"
+import { StreamUpload } from "./stream"
+import { setConflictOpen, setPendingConflict } from "./conflict"
 
 export const [uploadFiles, setUploadFiles] = createStore<{
   uploads: UploadFileProps[]
@@ -36,6 +34,12 @@ export const [uploadFiles, setUploadFiles] = createStore<{
 
 const abortControllers = new Map<string, AbortController>()
 const canceledPaths = new Set<string>()
+const canceledBatches = new Set<string>()
+const fileMap = new Map<
+  string,
+  { file: File; baseDir: string; overwrite: UploadOverwrite }
+>()
+let uploadBatchSeq = 0
 
 const uploadKeyOf = (u: UploadFileProps) => u.fullPath || u.path
 
@@ -55,11 +59,47 @@ export const cancelUpload = (key: string) => {
   )
 }
 
+export const cancelUploadBatch = (batchId: string) => {
+  canceledBatches.add(batchId)
+  const targets = uploadFiles.uploads.filter(
+    (u) => (u.batchId || "__default__") === batchId,
+  )
+  const activeCount = targets.filter(
+    (u) => !["success", "error"].includes(u.status),
+  ).length
+  for (const u of targets) {
+    const key = uploadKeyOf(u)
+    canceledPaths.add(key)
+    const controller = abortControllers.get(key)
+    if (controller) {
+      controller.abort()
+      abortControllers.delete(key)
+    }
+  }
+  setUploadFiles("uploads", (uploads) =>
+    uploads.filter((u) => (u.batchId || "__default__") !== batchId),
+  )
+  bus.emit("tool", "tasks_refresh")
+  if (activeCount > 0) {
+    notify.info(
+      localStorage.getItem("lang") === "en"
+        ? `Canceled ${activeCount} uploads`
+        : `已取消 ${activeCount} 个上传任务`,
+    )
+  }
+}
+
 export const cancelAllUploads = () => {
-  const activeKeys = uploadFiles.uploads
-    .filter((u) => !["success", "error"].includes(u.status))
-    .map((u) => uploadKeyOf(u))
+  const activeUploads = uploadFiles.uploads.filter(
+    (u) => !["success", "error"].includes(u.status),
+  )
+  const activeKeys = activeUploads.map((u) => uploadKeyOf(u))
   if (activeKeys.length === 0) return
+  for (const u of activeUploads) {
+    if (u.batchId) {
+      canceledBatches.add(u.batchId)
+    }
+  }
   for (const key of activeKeys) {
     canceledPaths.add(key)
     const controller = abortControllers.get(key)
@@ -146,6 +186,31 @@ const UploadFile = (props: UploadFileProps & { onRetry?: () => void }) => {
   )
 }
 
+const UPLOAD_CONCURRENCY = 4
+
+const getRelPath = (file: File) => file.webkitRelativePath || file.name
+
+const deriveUploadBatchLabel = (files: File[]): string => {
+  if (files.length === 1) {
+    return getRelPath(files[0])
+  }
+  let sharedTopDir: string | null = null
+  for (const file of files) {
+    const rel = getRelPath(file).replace(/\\/g, "/").replace(/^\/+/, "")
+    const slashIdx = rel.indexOf("/")
+    if (slashIdx <= 0) {
+      return ""
+    }
+    const topDir = rel.slice(0, slashIdx)
+    if (sharedTopDir === null) {
+      sharedTopDir = topDir
+    } else if (sharedTopDir !== topDir) {
+      return ""
+    }
+  }
+  return sharedTopDir || ""
+}
+
 const Upload = () => {
   const t = useT()
   const { pathname } = useRouter()
@@ -159,118 +224,276 @@ const Upload = () => {
   }
   let fileInput!: HTMLInputElement
   let folderInput!: HTMLInputElement
-  const fileMap = new Map<string, { file: File; baseDir: string }>()
-  const setUpload = (key: string, field: keyof UploadFileProps, value: any) => {
+  const setUpload = (
+    key: string,
+    field: keyof UploadFileProps,
+    value: any,
+    batchId?: string,
+  ) => {
     setUploadFiles(
       "uploads",
-      (upload) => uploadKeyOf(upload) === key,
+      (upload) =>
+        uploadKeyOf(upload) === key &&
+        (!batchId || (upload.batchId || "__default__") === batchId),
       field,
       value,
     )
   }
 
-  const uploaders = getUploads()
-  const [curUploader, setCurUploader] = createSignal(uploaders[0])
-  const asTaskUnsupported = () => curUploader()?.name === "Multipart"
+  const runUpload = (
+    uploadPath: string,
+    file: File,
+    overwrite: UploadOverwrite,
+    signal: AbortSignal,
+    batchId?: string,
+  ) => {
+    const uploader = getSettingBool("multipart_enabled")
+      ? MultipartUpload
+      : StreamUpload
+    return uploader(
+      uploadPath,
+      file,
+      (key, value) => {
+        setUpload(uploadPath, key, value, batchId)
+      },
+      overwrite,
+      false,
+      undefined,
+      signal,
+    )
+  }
 
   const runFileUpload = async (
     file: File,
     baseDir: string,
-    uploader: ReturnType<typeof getUploads>[0],
-    asTask: boolean,
-    overwrite: boolean,
+    overwrite: UploadOverwrite,
+    batchId?: string,
+    ensureDir?: (relDir: string) => Promise<void>,
   ): Promise<boolean> => {
-    const relPath = file.webkitRelativePath ? file.webkitRelativePath : file.name
+    const relPath = getRelPath(file)
     const uploadPath = pathJoin(baseDir, relPath)
-    if (canceledPaths.has(uploadPath)) {
+    if ((batchId && canceledBatches.has(batchId)) || canceledPaths.has(uploadPath)) {
       canceledPaths.delete(uploadPath)
       return false
     }
-    setUpload(uploadPath, "status", "uploading")
+    setUpload(uploadPath, "status", "uploading", batchId)
+    if (ensureDir) {
+      const normRel = relPath.replace(/\\/g, "/")
+      const lastSlash = normRel.lastIndexOf("/")
+      if (lastSlash > 0) {
+        await ensureDir(normRel.slice(0, lastSlash))
+        if ((batchId && canceledBatches.has(batchId)) || canceledPaths.has(uploadPath)) {
+          canceledPaths.delete(uploadPath)
+          return false
+        }
+      }
+    }
     const controller = new AbortController()
     abortControllers.set(uploadPath, controller)
     try {
-      const err = await uploader
-        .upload(
-          uploadPath,
-          file,
-          (key, value) => {
-            setUpload(uploadPath, key, value)
-          },
-          asTask,
-          overwrite,
-          false,
-          undefined,
-          controller.signal,
-        )
-        .catch((err) => err)
-      if (controller.signal.aborted || canceledPaths.has(uploadPath)) {
+      const err = await runUpload(
+        uploadPath,
+        file,
+        overwrite,
+        controller.signal,
+        batchId,
+      ).catch((err) => err)
+      if (
+        controller.signal.aborted ||
+        (batchId && canceledBatches.has(batchId)) ||
+        canceledPaths.has(uploadPath)
+      ) {
         canceledPaths.delete(uploadPath)
         return false
       }
       if (!err) {
-        setUpload(uploadPath, "status", "success")
-        setUpload(uploadPath, "progress", 100)
-        setUpload(uploadPath, "speed", 0)
+        setUpload(uploadPath, "status", "success", batchId)
+        setUpload(uploadPath, "progress", 100, batchId)
+        setUpload(uploadPath, "speed", 0, batchId)
         return true
       } else {
-        setUpload(uploadPath, "status", "error")
-        setUpload(uploadPath, "speed", 0)
-        setUpload(uploadPath, "msg", err.message)
+        setUpload(uploadPath, "status", "error", batchId)
+        setUpload(uploadPath, "speed", 0, batchId)
+        setUpload(uploadPath, "msg", err.message, batchId)
         notify.error(`${relPath}: ${err.message}`)
         return false
       }
     } catch (e: any) {
-      if (controller.signal.aborted || canceledPaths.has(uploadPath)) {
+      if (
+        controller.signal.aborted ||
+        (batchId && canceledBatches.has(batchId)) ||
+        canceledPaths.has(uploadPath)
+      ) {
         canceledPaths.delete(uploadPath)
         return false
       }
       console.error(e)
-      setUpload(uploadPath, "status", "error")
-      setUpload(uploadPath, "speed", 0)
-      setUpload(uploadPath, "msg", e.message)
+      setUpload(uploadPath, "status", "error", batchId)
+      setUpload(uploadPath, "speed", 0, batchId)
+      setUpload(uploadPath, "msg", e.message, batchId)
       notify.error(`${relPath}: ${e.message}`)
       return false
     } finally {
-      abortControllers.delete(uploadPath)
+      if (abortControllers.get(uploadPath) === controller) {
+        abortControllers.delete(uploadPath)
+      }
+    }
+  }
+
+  const startBatchUpload = async (
+    files: File[],
+    baseDir: string,
+    overwrite: UploadOverwrite,
+  ) => {
+    if (files.length === 0) return
+    const batchId = `upload-${Date.now()}-${++uploadBatchSeq}`
+    const batchLabel = deriveUploadBatchLabel(files)
+    const batchTotal = files.length
+
+    const newUploads: UploadFileProps[] = []
+    const newKeys = new Set<string>()
+    for (const file of files) {
+      const upload = File2Upload(file)
+      const fullPath = pathJoin(baseDir, upload.path)
+      upload.fullPath = fullPath
+      upload.batchId = batchId
+      upload.batchLabel = batchLabel
+      upload.batchTotal = batchTotal
+
+      const existingController = abortControllers.get(fullPath)
+      if (existingController) {
+        existingController.abort()
+        abortControllers.delete(fullPath)
+      }
+      canceledPaths.delete(fullPath)
+      fileMap.set(fullPath, { file, baseDir, overwrite })
+      if (newKeys.has(fullPath)) {
+        const idx = newUploads.findIndex((u) => uploadKeyOf(u) === fullPath)
+        if (idx !== -1) newUploads.splice(idx, 1)
+      }
+      newKeys.add(fullPath)
+      newUploads.push(upload)
+    }
+    setUploadFiles("uploads", (uploads) => [
+      ...uploads.filter((u) => !newKeys.has(uploadKeyOf(u))),
+      ...newUploads,
+    ])
+    bus.emit("tool", "close_upload")
+    bus.emit("tool", "tasks_refresh")
+
+    try {
+      const dirPromises = new Map<string, Promise<void>>()
+      const ensureDir = (relDir: string): Promise<void> => {
+        if (!relDir || canceledBatches.has(batchId)) {
+          return Promise.resolve()
+        }
+        const existing = dirPromises.get(relDir)
+        if (existing) {
+          return existing
+        }
+        const promise = (async () => {
+          const lastSlash = relDir.lastIndexOf("/")
+          if (lastSlash > 0) {
+            await ensureDir(relDir.slice(0, lastSlash))
+          }
+          if (canceledBatches.has(batchId)) return
+          try {
+            await fsMkdir(pathJoin(baseDir, relDir))
+          } catch {
+            // Ignore; individual file puts still call MakeDir as fallback.
+          }
+        })()
+        dirPromises.set(relDir, promise)
+        return promise
+      }
+
+      let anySucceeded = false
+      for await (const ok of asyncPool(UPLOAD_CONCURRENCY, files, (f) =>
+        runFileUpload(f, baseDir, overwrite, batchId, ensureDir),
+      )) {
+        if (ok) anySucceeded = true
+      }
+      const batchDone = uploadFiles.uploads
+        .filter((u) => (u.batchId || "__default__") === batchId)
+        .every(({ status }) => ["success", "error"].includes(status))
+      if (batchDone) {
+        setUploadFiles("uploads", (uploads) =>
+          uploads.filter((u) => (u.batchId || "__default__") !== batchId),
+        )
+      }
+      bus.emit("tool", "tasks_refresh")
+      if (anySucceeded && pathname() === baseDir) {
+        refresh(false, true)
+      }
+    } finally {
+      canceledBatches.delete(batchId)
     }
   }
 
   const handleAddFiles = async (files: File[]) => {
     if (files.length === 0) return
     const baseDir = pathname()
-    const uploader = curUploader()
-    const asTask = asTaskUnsupported() ? false : uploadConfig.asTask
-    const overwrite = uploadConfig.overwrite
+    const existingNames = new Set(objStore.objs.map((o) => o.name))
+    if (objStore.total > objStore.objs.length) {
+      try {
+        const resp = await fsList(baseDir, password(), 1, 0, false)
+        if (resp.code === 200 && Array.isArray(resp.data?.content)) {
+          for (const item of resp.data.content) {
+            existingNames.add(item.name)
+          }
+        }
+      } catch {
+        // Fallback silently to loaded objStore.objs if listing fails.
+      }
+    }
+    const basePrefix =
+      baseDir === "/" ? "/" : baseDir.replace(/\/+$/, "") + "/"
+    for (const u of uploadFiles.uploads) {
+      if (u.status === "error") continue
+      const key = uploadKeyOf(u).replace(/\\/g, "/")
+      if (!key.startsWith(basePrefix)) continue
+      const rel = key.slice(basePrefix.length)
+      if (!rel) continue
+      const slashIdx = rel.indexOf("/")
+      const topName = slashIdx > 0 ? rel.slice(0, slashIdx) : rel
+      if (topName) {
+        existingNames.add(topName)
+      }
+    }
+    const conflicts: string[] = []
+    const seenConflicts = new Set<string>()
+    const directFileConflicts = new Set<string>()
+
     for (const file of files) {
-      const upload = File2Upload(file)
-      const fullPath = pathJoin(baseDir, upload.path)
-      upload.fullPath = fullPath
-      canceledPaths.delete(fullPath)
-      fileMap.set(fullPath, { file, baseDir })
-      setUploadFiles("uploads", (uploads) => [
-        ...uploads.filter((u) => uploadKeyOf(u) !== fullPath),
-        upload,
-      ])
+      const rel = getRelPath(file).replace(/\\/g, "/").replace(/^\/+/, "")
+      if (!rel) continue
+      const slashIdx = rel.indexOf("/")
+      const isDirEntry = slashIdx > 0
+      const topName = isDirEntry ? rel.slice(0, slashIdx) : rel
+      if (!existingNames.has(topName)) continue
+      const label = isDirEntry ? `${topName}/` : topName
+      if (!seenConflicts.has(label)) {
+        seenConflicts.add(label)
+        conflicts.push(label)
+      }
+      if (!isDirEntry) {
+        directFileConflicts.add(getRelPath(file))
+      }
     }
-    bus.emit("tool", "close_upload")
-    bus.emit("tool", "tasks_refresh")
-    let anySucceeded = false
-    for await (const ok of asyncPool(3, files, (f) =>
-      runFileUpload(f, baseDir, uploader, asTask, overwrite),
-    )) {
-      if (ok) anySucceeded = true
-    }
-    if (
-      uploadFiles.uploads.every(({ status }) =>
-        ["success", "error"].includes(status),
-      )
-    ) {
-      setUploadFiles("uploads", [])
-    }
-    bus.emit("tool", "tasks_refresh")
-    if (anySucceeded && pathname() === baseDir) {
-      refresh(false, true)
+
+    if (conflicts.length === 0) {
+      await startBatchUpload(files, baseDir, "skip")
+    } else {
+      bus.emit("tool", "close_upload")
+      setPendingConflict({
+        baseDir,
+        files,
+        conflicts,
+        directFileConflicts,
+        onConfirm: (toUpload, dir, ov) =>
+          void startBatchUpload(toUpload, dir, ov),
+      })
+      setConflictOpen(true)
     }
   }
 
@@ -281,13 +504,7 @@ const Upload = () => {
     setUpload(key, "msg", "")
     setUpload(key, "progress", 0)
     setUpload(key, "speed", 0)
-    const ok = await runFileUpload(
-      item.file,
-      item.baseDir,
-      curUploader(),
-      asTaskUnsupported() ? false : uploadConfig.asTask,
-      uploadConfig.overwrite,
-    )
+    const ok = await runFileUpload(item.file, item.baseDir, item.overwrite)
     if (ok && pathname() === item.baseDir) {
       refresh(false, true)
     }
@@ -408,22 +625,6 @@ const Upload = () => {
             <Heading size="lg" textAlign="center">
               {t("home.upload.upload-tips")}
             </Heading>
-            <Box w={{ "@initial": "80%", "@md": "30%" }}>
-              <SelectWrapper
-                value={curUploader()?.name}
-                onChange={(name) => {
-                  setCurUploader(
-                    uploaders.find((uploader) => uploader.name === name)!,
-                  )
-                }}
-                options={uploaders.map((uploader) => {
-                  return {
-                    label: uploader.name,
-                    value: uploader.name,
-                  }
-                })}
-              />
-            </Box>
             <HStack spacing="$4">
               <VStack spacing="$2" alignItems="center">
                 <IconButton
@@ -456,28 +657,6 @@ const Upload = () => {
                 </Text>
               </VStack>
             </HStack>
-            <Stack
-              spacing={{ "@initial": "$2", "@md": "$4" }}
-              direction={{ "@initial": "column", "@md": "row" }}
-            >
-              <Checkbox
-                checked={!asTaskUnsupported() && uploadConfig.asTask}
-                disabled={asTaskUnsupported()}
-                onChange={() => {
-                  setUploadConfig({ asTask: !uploadConfig.asTask })
-                }}
-              >
-                {t("home.upload.add_as_task")}
-              </Checkbox>
-              <Checkbox
-                checked={uploadConfig.overwrite}
-                onChange={() => {
-                  setUploadConfig({ overwrite: !uploadConfig.overwrite })
-                }}
-              >
-                {t("home.conflict_policy.overwrite_existing")}
-              </Checkbox>
-            </Stack>
           </Show>
         </VStack>
       </Show>

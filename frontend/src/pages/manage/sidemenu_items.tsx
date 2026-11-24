@@ -1,14 +1,10 @@
 import { SideMenuItemProps } from "./SideMenu"
-import {
-  BsFingerprint,
-  BsCloudUploadFill,
-} from "solid-icons/bs"
+import { BsFingerprint } from "solid-icons/bs"
 import { CgShare } from "solid-icons/cg"
 import { OcWorkflow2 } from "solid-icons/oc"
 import { IoCopy, IoMove, IoHome } from "solid-icons/io"
 import { Component, lazy } from "solid-js"
 import { UserRole } from "~/types"
-import { TbArchive } from "solid-icons/tb"
 
 export type SideMenuItem = SideMenuItemProps & {
   component?: Component
@@ -31,13 +27,6 @@ export const side_menu_items: SideMenuItem[] = [
     backend: ["go"],
     children: [
       {
-        title: "manage.sidemenu.upload",
-        icon: BsCloudUploadFill,
-        to: "/@manage/tasks/upload",
-        role: UserRole.GENERAL,
-        component: lazy(() => import("./tasks/Upload")),
-      },
-      {
         title: "manage.sidemenu.copy",
         icon: IoCopy,
         to: "/@manage/tasks/copy",
@@ -50,13 +39,6 @@ export const side_menu_items: SideMenuItem[] = [
         to: "/@manage/tasks/move",
         role: UserRole.GENERAL,
         component: lazy(() => import("./tasks/Move")),
-      },
-      {
-        title: "manage.sidemenu.decompress",
-        icon: TbArchive,
-        to: "/@manage/tasks/decompress",
-        role: UserRole.GENERAL,
-        component: lazy(() => import("./tasks/Decompress")),
       },
     ],
   },

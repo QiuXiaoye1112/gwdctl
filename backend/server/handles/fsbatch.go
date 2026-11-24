@@ -2,6 +2,7 @@ package handles
 
 import (
 	"fmt"
+	stdpath "path"
 	"slices"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
@@ -13,6 +14,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/pkg/generic"
 	"github.com/OpenListTeam/OpenList/v4/server/common"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -147,11 +149,21 @@ func FsRecursiveMove(c *gin.Context) {
 
 	var count = 0
 	addedTasks := make([]task.TaskExtensionInfo, 0, len(movingFileNames))
+	batchID := uuid.NewString()
+	batchLabel := stdpath.Base(dstDir)
+	if batchLabel == "" || batchLabel == "." {
+		batchLabel = "/"
+	}
+	if len(movingFileNames) == 1 {
+		batchLabel = stdpath.Base(movingFileNames[0])
+	}
 	for i, fileName := range movingFileNames {
 		// move
 		t, err := fs.MoveWithOptions(c.Request.Context(), fileName, dstDir, fs.TransferOptions{
-			SkipHook:  len(movingFileNames) > i+1,
-			Overwrite: req.ConflictPolicy == OVERWRITE,
+			SkipHook:   len(movingFileNames) > i+1,
+			Overwrite:  req.ConflictPolicy == OVERWRITE,
+			BatchID:    batchID,
+			BatchLabel: batchLabel,
 		})
 		if t != nil {
 			addedTasks = append(addedTasks, t)

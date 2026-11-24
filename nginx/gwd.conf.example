@@ -1,0 +1,50 @@
+# gwdctl Nginx 反向代理参考配置（适用于大文件流式上传与文件夹打包 ZIP 流式下载）
+# 请将下方的 drive.example.com 替换为你的实际域名，并按实际路径配置 SSL 证书。
+
+server {
+    server_name drive.example.com;
+
+    # 不限制上传请求体大小，避免大文件上传被 Nginx 拦截返回 413
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://127.0.0.1:5244;
+        proxy_http_version 1.1;
+
+        # 覆盖客户端传入的转发头，确保限流等逻辑拿到真实客户端 IP
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 支持 WebSocket 连接升级
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 关闭响应与请求缓冲，避免大文件上传/打包 ZIP 下载在 Nginx 侧落盘占用 VPS 磁盘
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        # 延长超时时间以匹配长时间大文件传输
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    listen [::]:443 ssl ipv6only=on; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/drive.example.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/drive.example.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+}
+
+server {
+    if ($host = drive.example.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+    listen 80;
+    listen [::]:80;
+    server_name drive.example.com;
+    return 404; # managed by Certbot
+}

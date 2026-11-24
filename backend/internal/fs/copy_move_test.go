@@ -520,3 +520,47 @@ func TestFileTransfer_MergeConflictRejectsFileVsFolder(t *testing.T) {
 		t.Fatalf("destination folder must remain intact after conflict")
 	}
 }
+
+func TestFileTransfer_BatchIDPropagatesToNestedChildren(t *testing.T) {
+	ctx := context.Background()
+	env := setupFSTestEnv(t)
+
+	drvA := newFSMemDrive("fsBatchA-" + t.Name())
+	drvB := newFSMemDrive("fsBatchB-" + t.Name())
+	env.mountDrive(t, "/drvBatchA", drvA)
+	env.mountDrive(t, "/drvBatchB", drvB)
+
+	rootFolder := drvA.SeedDir("root", "folder")
+	sub1 := drvA.SeedDir(rootFolder, "sub1")
+	sub2 := drvA.SeedDir(rootFolder, "sub2")
+	deep := drvA.SeedDir(sub2, "deep")
+	drvA.SeedFile(sub1, "a.txt", "alpha")
+	drvA.SeedFile(deep, "b.txt", "beta")
+
+	rootTask, err := CopyWithOptions(ctx, "/drvBatchA/folder", "/drvBatchB", TransferOptions{
+		BatchID:    "batch-xyz",
+		BatchLabel: "folder",
+	})
+	if err != nil {
+		t.Fatalf("enqueue nested copy failed: %v", err)
+	}
+	if rootTask.GetBatchID() != "batch-xyz" || rootTask.GetBatchLabel() != "folder" {
+		t.Fatalf("unexpected root task batch metadata: id=%q label=%q", rootTask.GetBatchID(), rootTask.GetBatchLabel())
+	}
+
+	tasks := waitManagerIdle(t, CopyTaskManager)
+	if len(tasks) < 5 {
+		t.Fatalf("expected root + subdirs + file child tasks (>=5), got %d", len(tasks))
+	}
+	for _, tk := range tasks {
+		if tk.GetState() != tache.StateSucceeded {
+			t.Fatalf("task %q failed: state=%v err=%v", tk.GetName(), tk.GetState(), tk.GetErr())
+		}
+		if tk.GetBatchID() != "batch-xyz" {
+			t.Fatalf("child task %q lost batch ID: got %q", tk.GetName(), tk.GetBatchID())
+		}
+		if tk.GetBatchLabel() != "folder" {
+			t.Fatalf("child task %q lost batch label: got %q", tk.GetName(), tk.GetBatchLabel())
+		}
+	}
+}

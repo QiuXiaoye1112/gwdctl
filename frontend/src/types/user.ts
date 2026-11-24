@@ -41,6 +41,7 @@ export const REMOVED_PERMISSION_KEYS = [
   "webdav_manage",
   "ftp_read",
   "ftp_manage",
+  "decompress",
 ] as const
 
 export const ActivePermissions = UserPermissions.map((name, index) => ({

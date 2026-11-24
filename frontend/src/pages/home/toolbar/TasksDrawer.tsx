@@ -23,6 +23,7 @@ import {
   VStack,
 } from "@hope-ui/solid"
 import {
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -39,7 +40,7 @@ import { bus, getFileSize, notify, r } from "~/utils"
 import { TaskInfo, Resp } from "~/types"
 import { me } from "~/store"
 import { UserMethods } from "~/types"
-import { uploadFiles, cancelUpload, cancelAllUploads } from "../uploads/Upload"
+import { uploadFiles, cancelUpload, cancelUploadBatch } from "../uploads/Upload"
 
 export const [runningTaskCount, setRunningTaskCount] = createSignal(0)
 
@@ -55,9 +56,6 @@ const TASK_CATEGORIES: {
   labelEn: string
   color: "info" | "warning" | "success" | "neutral" | "primary" | "accent" | "danger"
 }[] = [
-  { type: "decompress", labelZh: "解压缩", labelEn: "Decompress", color: "primary" },
-  { type: "decompress_upload", labelZh: "解压转存", labelEn: "Upload Extract", color: "accent" },
-  { type: "upload", labelZh: "上传", labelEn: "Upload", color: "info" },
   { type: "copy", labelZh: "复制", labelEn: "Copy", color: "primary" },
   { type: "move", labelZh: "移动", labelEn: "Move", color: "warning" },
 ]
@@ -70,9 +68,6 @@ function pathBaseName(p: string): string {
 
 function formatTaskName(name: string): string {
   if (!name) return ""
-  // match decompress [device](path)[inner] to ...
-  const decompressMatch = name.match(/decompress\s+\[[^\]]*\]\(([^)]+)\)/i)
-  if (decompressMatch) return pathBaseName(decompressMatch[1])
   // match upload [device](path) or upload <filename with spaces> to [dstMp](dstPath)
   const uploadBracketMatch = name.match(/^upload\s+\[[^\]]*\]\(([^)]+)\)/i)
   if (uploadBracketMatch) return pathBaseName(uploadBracketMatch[1])
@@ -88,17 +83,19 @@ function formatTaskName(name: string): string {
 
 function parseTransferGroup(
   task: RunningTaskItem,
-): { key: string; label: string; dstPath: string } | null {
+): { key: string; batchId?: string; label: string; dstPath?: string } | null {
+  if (task.batch_id) {
+    return {
+      key: `${task.taskType}|batch|${task.batch_id}`,
+      batchId: task.batch_id,
+      label: task.batch_label || formatTaskName(task.name),
+    }
+  }
   let match: RegExpMatchArray | null = null
   if (task.taskType === "copy" || task.taskType === "move") {
     match = task.name.match(
       /(?:copy|move|merge)\s+\[[^\]]*\]\([^)]+\)\s+to\s+\[([^\]]*)\]\(([^)]+)\)/i,
     )
-  } else if (
-    task.taskType === "decompress_upload" ||
-    task.taskType === "upload"
-  ) {
-    match = task.name.match(/^upload\s+.+?\s+to\s+\[([^\]]*)\]\(([^)]+)\)/i)
   }
   if (!match) return null
   const dstMount = match[1] || "/"
@@ -111,6 +108,7 @@ function parseTransferGroup(
 interface TaskGroupEntry {
   kind: "single" | "group"
   key: string
+  batchId?: string
   taskType: string
   typeLabel: string
   typeColor: RunningTaskItem["typeColor"]
@@ -125,26 +123,40 @@ export const TasksDrawer = () => {
   const { refresh } = usePath()
   const { isOpen, onOpen, onClose } = createDisclosure()
   const [tasks, setTasks] = createSignal<RunningTaskItem[]>([])
-  const [groupPeaks, setGroupPeaks] = createSignal<Record<string, number>>({})
+  const [groupTotals, setGroupTotals] = createSignal<Record<string, number>>({})
+  const [stickyMultiKeys, setStickyMultiKeys] = createSignal<
+    Record<string, boolean>
+  >({})
   const [expandedGroups, setExpandedGroups] = createSignal<
     Record<string, boolean>
   >({})
-  const [uploadsExpanded, setUploadsExpanded] = createSignal(false)
+  const [uploadsExpanded, setUploadsExpanded] = createSignal<
+    Record<string, boolean>
+  >({})
   const [loading, setLoading] = createSignal(false)
   const [cancelingId, setCancelingId] = createSignal<string>("")
   const [cancelingGroupKey, setCancelingGroupKey] = createSignal<string>("")
   const prevCountByCategory: Record<string, number> = {}
+  const prevGroupCounts: Record<string, number> = {}
+  const batchSeenIds = new Map<string, Set<string>>()
+  const stickyMultiSet = new Set<string>()
   let fetchingTasks = false
   let refetchQueued = false
   const trackedTaskIds: Record<"copy" | "move", Set<string>> = {
     copy: new Set(),
     move: new Set(),
   }
+  const trackedBatchIds: Record<"copy" | "move", Set<string>> = {
+    copy: new Set(),
+    move: new Set(),
+  }
+  const notifiedFailedIds = new Set<string>()
 
   const isEn = () => localStorage.getItem("lang") === "en"
 
   const groupedEntries = createMemo<TaskGroupEntry[]>(() => {
     const all = tasks()
+    const sticky = stickyMultiKeys()
     const groupMap = new Map<string, TaskGroupEntry>()
     const entries: TaskGroupEntry[] = []
 
@@ -165,8 +177,9 @@ export const TasksDrawer = () => {
       let existing = groupMap.get(parsed.key)
       if (!existing) {
         existing = {
-          kind: "single",
+          kind: sticky[parsed.key] ? "group" : "single",
           key: parsed.key,
+          batchId: parsed.batchId,
           taskType: item.taskType,
           typeLabel: item.typeLabel,
           typeColor: item.typeColor,
@@ -188,6 +201,7 @@ export const TasksDrawer = () => {
   const notifyFailedTrackedTasks = async (
     taskType: "copy" | "move",
     finishedIds: Set<string>,
+    finishedBatchIds: Set<string>,
   ) => {
     try {
       const doneRes = (await r.get(`/task/${taskType}/done`, {
@@ -195,7 +209,13 @@ export const TasksDrawer = () => {
       } as any)) as Resp<TaskInfo[]>
       if (doneRes.code !== 200 || !Array.isArray(doneRes.data)) return
       for (const item of doneRes.data) {
-        if (!finishedIds.has(item.id) || item.state !== 7) continue
+        if (item.state !== 7 || notifiedFailedIds.has(item.id)) continue
+        const matchedById = finishedIds.has(item.id)
+        const matchedByBatch = Boolean(
+          item.batch_id && finishedBatchIds.has(item.batch_id),
+        )
+        if (!matchedById && !matchedByBatch) continue
+        notifiedFailedIds.add(item.id)
         const label = formatTaskName(item.name)
         const detail = item.error || item.status || "Task failed"
         notify.error(label ? `${label}: ${detail}` : detail)
@@ -205,15 +225,34 @@ export const TasksDrawer = () => {
     }
   }
 
-  const activeUploads = () =>
-    uploadFiles.uploads.filter(
-      (u) => !["success", "error"].includes(u.status),
+  const activeUploadBatches = createMemo(() => {
+    const grouped = new Map<
+      string,
+      { id: string; label: string; total: number; items: typeof uploadFiles.uploads }
+    >()
+    for (const item of uploadFiles.uploads) {
+      const batchId = item.batchId || "__default__"
+      let entry = grouped.get(batchId)
+      if (!entry) {
+        entry = {
+          id: batchId,
+          label: item.batchLabel || "",
+          total: item.batchTotal ?? 0,
+          items: [],
+        }
+        grouped.set(batchId, entry)
+      } else if (!entry.label && item.batchLabel) {
+        entry.label = item.batchLabel
+      }
+      entry.items.push(item)
+    }
+    return Array.from(grouped.values()).filter((b) =>
+      b.items.some((u) => !["success", "error"].includes(u.status)),
     )
+  })
 
-  const batchUploads = () =>
-    uploadFiles.uploads.filter((u) => u.status !== "error")
-
-  const totalRunningCount = () => activeUploads().length + tasks().length
+  const totalRunningCount = () =>
+    activeUploadBatches().length + groupedEntries().length
 
   createEffect(() => {
     setRunningTaskCount(totalRunningCount())
@@ -232,6 +271,7 @@ export const TasksDrawer = () => {
     fetchingTasks = true
     if (showLoading) setLoading(true)
     try {
+      const prevTasks = tasks()
       const succeededCategories = new Set<string>()
       const runningIdsByType: Record<string, Set<string>> = {}
       const results = await Promise.all(
@@ -253,11 +293,39 @@ export const TasksDrawer = () => {
           } catch {
             // ignore network/auth errors for specific categories
           }
-          return []
-        })
+          // Preserve previous items on transient poll failure so cards do not flicker.
+          return prevTasks.filter((item) => item.taskType === cat.type)
+        }),
       )
       const allRunning = results.flat()
       let shouldRefresh = false
+
+      // Automatically track child tasks belonging to tracked batches so nested failures notify cleanly.
+      const activeBatchIdsByType: Record<"copy" | "move", Set<string>> = {
+        copy: new Set(),
+        move: new Set(),
+      }
+      const finishedBatchIdsByType: Record<"copy" | "move", Set<string>> = {
+        copy: new Set(),
+        move: new Set(),
+      }
+      for (const item of allRunning) {
+        if (item.batch_id && (item.taskType === "copy" || item.taskType === "move")) {
+          activeBatchIdsByType[item.taskType].add(item.batch_id)
+          if (trackedBatchIds[item.taskType].has(item.batch_id)) {
+            trackedTaskIds[item.taskType].add(item.id)
+          }
+        }
+      }
+      for (const trackedType of ["copy", "move"] as const) {
+        if (!succeededCategories.has(trackedType)) continue
+        for (const bid of trackedBatchIds[trackedType]) {
+          if (!activeBatchIdsByType[trackedType].has(bid)) {
+            trackedBatchIds[trackedType].delete(bid)
+            finishedBatchIdsByType[trackedType].add(bid)
+          }
+        }
+      }
 
       // Only refresh once a category's running tasks completely drain to 0,
       // preventing a refresh storm when a folder copy spawns hundreds of sub-tasks.
@@ -272,7 +340,7 @@ export const TasksDrawer = () => {
       }
 
       for (const trackedType of ["copy", "move"] as const) {
-        if (!succeededCategories.has(trackedType) || trackedTaskIds[trackedType].size === 0) {
+        if (!succeededCategories.has(trackedType)) {
           continue
         }
         const stillRunning = runningIdsByType[trackedType]
@@ -289,45 +357,79 @@ export const TasksDrawer = () => {
           if (stillRunning.size === 0) {
             shouldRefresh = true
           }
-          void notifyFailedTrackedTasks(trackedType, finishedIds)
+        }
+        if (
+          finishedIds.size > 0 ||
+          finishedBatchIdsByType[trackedType].size > 0
+        ) {
+          void notifyFailedTrackedTasks(
+            trackedType,
+            finishedIds,
+            finishedBatchIdsByType[trackedType],
+          )
         }
       }
 
-      // Track peak size per active transfer group for smooth overall batch progress.
+      // Track seen task IDs per batch so each operation stays a single stable card until completion.
       const currentGroupCounts: Record<string, number> = {}
+      const succeededSet = succeededCategories
       for (const item of allRunning) {
         const parsed = parseTransferGroup(item)
-        if (parsed) {
-          currentGroupCounts[parsed.key] =
-            (currentGroupCounts[parsed.key] ?? 0) + 1
+        if (!parsed) continue
+        currentGroupCounts[parsed.key] = (currentGroupCounts[parsed.key] ?? 0) + 1
+        let seen = batchSeenIds.get(parsed.key)
+        if (!seen) {
+          seen = new Set<string>()
+          batchSeenIds.set(parsed.key, seen)
+        }
+        seen.add(item.id)
+        if (seen.size >= 2) {
+          stickyMultiSet.add(parsed.key)
         }
       }
-      setGroupPeaks((prev) => {
-        const next: Record<string, number> = {}
-        for (const [key, count] of Object.entries(currentGroupCounts)) {
-          if (count >= 2 || prev[key] !== undefined) {
-            next[key] = Math.max(prev[key] ?? 0, count)
-          }
+      for (const prevKey of Object.keys(prevGroupCounts)) {
+        const keyType = prevKey.split("|")[0]
+        if (!succeededSet.has(keyType)) continue
+        if (!currentGroupCounts[prevKey]) {
+          delete prevGroupCounts[prevKey]
+          batchSeenIds.delete(prevKey)
+          stickyMultiSet.delete(prevKey)
+          shouldRefresh = true
         }
-        return next
-      })
-      setExpandedGroups((prev) => {
-        let changed = false
-        const next: Record<string, boolean> = {}
-        for (const [key, expanded] of Object.entries(prev)) {
-          if ((currentGroupCounts[key] ?? 0) >= 2 && expanded) {
-            next[key] = true
-          } else if (expanded) {
-            changed = true
-          }
-        }
-        return changed ? next : prev
-      })
+      }
+      for (const [key, count] of Object.entries(currentGroupCounts)) {
+        prevGroupCounts[key] = count
+      }
+
+      const nextTotals: Record<string, number> = {}
+      for (const [key, seen] of batchSeenIds.entries()) {
+        nextTotals[key] = seen.size
+      }
+      const nextSticky: Record<string, boolean> = {}
+      for (const key of stickyMultiSet) {
+        nextSticky[key] = true
+      }
 
       if (shouldRefresh) {
         refresh(false, true)
       }
-      setTasks(allRunning)
+      batch(() => {
+        setGroupTotals(nextTotals)
+        setStickyMultiKeys(nextSticky)
+        setTasks(allRunning)
+        setExpandedGroups((prev) => {
+          let changed = false
+          const next: Record<string, boolean> = {}
+          for (const [key, expanded] of Object.entries(prev)) {
+            if ((currentGroupCounts[key] ?? 0) > 0 && expanded) {
+              next[key] = true
+            } else if (expanded) {
+              changed = true
+            }
+          }
+          return changed ? next : prev
+        })
+      })
     } finally {
       fetchingTasks = false
       if (showLoading) setLoading(false)
@@ -358,6 +460,23 @@ export const TasksDrawer = () => {
   const cancelTaskGroup = async (entry: TaskGroupEntry) => {
     setCancelingGroupKey(entry.key)
     try {
+      if (entry.batchId) {
+        const res = (await r.post(
+          `/task/${entry.taskType}/cancel_batch?batch_id=${encodeURIComponent(entry.batchId)}`,
+        )) as Resp<{ canceled?: number }>
+        if (res.code === 200) {
+          const canceledCount = res.data?.canceled ?? entry.tasks.length
+          notify.success(
+            isEn()
+              ? `Canceled ${canceledCount} tasks`
+              : `已取消 ${canceledCount} 个任务`,
+          )
+          await fetchRunningTasks()
+        } else {
+          notify.error(res.message)
+        }
+        return
+      }
       const ids = entry.tasks.map((item) => item.id)
       const res = (await r.post(
         `/task/${entry.taskType}/cancel_some`,
@@ -387,6 +506,13 @@ export const TasksDrawer = () => {
     }))
   }
 
+  const toggleUploadExpand = (batchId: string) => {
+    setUploadsExpanded((prev) => ({
+      ...prev,
+      [batchId]: !prev[batchId],
+    }))
+  }
+
   const handler = (name: string) => {
     if (name === "tasks") {
       onOpen()
@@ -398,13 +524,20 @@ export const TasksDrawer = () => {
   const trackTasksHandler = ({
     type,
     ids,
+    batchIds,
   }: {
     type: "copy" | "move"
     ids: string[]
+    batchIds?: string[]
   }) => {
     for (const id of ids) {
       if (id) {
         trackedTaskIds[type].add(id)
+      }
+    }
+    for (const bid of batchIds ?? []) {
+      if (bid) {
+        trackedBatchIds[type].add(bid)
       }
     }
     void fetchRunningTasks(false)
@@ -490,287 +623,322 @@ export const TasksDrawer = () => {
               }
             >
               <VStack spacing="$3" alignItems="stretch">
-                <Show when={activeUploads().length > 0}>
-                  <Show
-                    when={batchUploads().length >= 2}
-                    fallback={
-                      <For each={activeUploads()}>
-                        {(up) => (
-                          <Box
-                            p="$3"
-                            rounded="$md"
-                            border="1px solid"
-                            borderColor="$neutral5"
-                            bgColor="$neutral2"
-                            _hover={{ borderColor: "$info7" }}
-                            transition="border-color 0.2s"
-                          >
-                            <HStack justifyContent="space-between" mb="$2">
-                              <HStack spacing="$2" overflow="hidden" maxW="70%">
-                                <Badge colorScheme="info" flexShrink={0}>
-                                  {isEn() ? "Upload" : "上传"}
+                <For each={activeUploadBatches()}>
+                  {(uploadBatch) => {
+                    const activeItems = () =>
+                      uploadBatch.items.filter(
+                        (u) => !["success", "error"].includes(u.status),
+                      )
+                    const batchNonError = () =>
+                      uploadBatch.items.filter((u) => u.status !== "error")
+                    const isSingle = () =>
+                      (uploadBatch.total || uploadBatch.items.length) === 1 &&
+                      activeItems().length === 1
+                    return (
+                      <Show
+                        when={!isSingle()}
+                        fallback={(() => {
+                          const up = activeItems()[0]
+                          if (!up) return null
+                          return (
+                            <Box
+                              p="$3"
+                              rounded="$md"
+                              border="1px solid"
+                              borderColor="$neutral5"
+                              bgColor="$neutral2"
+                              _hover={{ borderColor: "$info7" }}
+                              transition="border-color 0.2s"
+                            >
+                              <HStack justifyContent="space-between" mb="$2">
+                                <HStack spacing="$2" overflow="hidden" maxW="70%">
+                                  <Badge colorScheme="info" flexShrink={0}>
+                                    {isEn() ? "Upload" : "上传"}
+                                  </Badge>
+                                  <Text
+                                    fontWeight="$semibold"
+                                    fontSize="$sm"
+                                    noOfLines={1}
+                                    title={up.fullPath || up.path}
+                                  >
+                                    {up.path}
+                                  </Text>
+                                </HStack>
+                                <Badge colorScheme="success" flexShrink={0}>
+                                  {getFileSize(up.speed)}/s
                                 </Badge>
-                                <Text
-                                  fontWeight="$semibold"
-                                  fontSize="$sm"
-                                  noOfLines={1}
-                                  title={up.fullPath || up.path}
+                              </HStack>
+                              <HStack spacing="$2">
+                                <Progress
+                                  value={up.progress}
+                                  w="$full"
+                                  size="sm"
+                                  rounded="$full"
                                 >
-                                  {up.path}
+                                  <ProgressIndicator
+                                    color={
+                                      up.progress >= 100
+                                        ? "$success9"
+                                        : "$info9"
+                                    }
+                                    rounded="$full"
+                                  />
+                                </Progress>
+                                <Text
+                                  fontSize="$xs"
+                                  fontWeight="$medium"
+                                  color="$neutral11"
+                                  minW="40px"
+                                  textAlign="right"
+                                >
+                                  {up.progress.toFixed(0)}%
                                 </Text>
                               </HStack>
-                              <Badge colorScheme="success" flexShrink={0}>
-                                {getFileSize(up.speed)}/s
-                              </Badge>
-                            </HStack>
-                            <HStack spacing="$2">
-                              <Progress
-                                value={up.progress}
-                                w="$full"
-                                size="sm"
-                                rounded="$full"
+                              <HStack
+                                justifyContent="space-between"
+                                alignItems="center"
+                                mt="$2"
                               >
-                                <ProgressIndicator
-                                  color={
-                                    up.progress >= 100 ? "$success9" : "$info9"
+                                <Text
+                                  fontSize="$xs"
+                                  color="$neutral9"
+                                  noOfLines={1}
+                                  maxW="75%"
+                                  title={up.fullPath || up.path}
+                                >
+                                  {getFileSize(up.size)}
+                                </Text>
+                                <Button
+                                  size="xs"
+                                  colorScheme="danger"
+                                  variant="subtle"
+                                  onClick={() =>
+                                    cancelUpload(up.fullPath || up.path)
                                   }
-                                  rounded="$full"
-                                />
-                              </Progress>
-                              <Text
-                                fontSize="$xs"
-                                fontWeight="$medium"
-                                color="$neutral11"
-                                minW="40px"
-                                textAlign="right"
-                              >
-                                {up.progress.toFixed(0)}%
-                              </Text>
-                            </HStack>
-                            <HStack
-                              justifyContent="space-between"
-                              alignItems="center"
-                              mt="$2"
-                            >
-                              <Text
-                                fontSize="$xs"
-                                color="$neutral9"
-                                noOfLines={1}
-                                maxW="75%"
-                                title={up.fullPath || up.path}
-                              >
-                                {getFileSize(up.size)}
-                              </Text>
-                              <Button
-                                size="xs"
-                                colorScheme="danger"
-                                variant="subtle"
-                                onClick={() =>
-                                  cancelUpload(up.fullPath || up.path)
-                                }
-                              >
-                                {isEn() ? "Cancel" : "取消"}
-                              </Button>
-                            </HStack>
-                          </Box>
-                        )}
-                      </For>
-                    }
-                  >
-                    {(() => {
-                      const totalSpeed = () =>
-                        activeUploads().reduce(
-                          (acc, u) => acc + (Number.isFinite(u.speed) ? u.speed : 0),
-                          0,
-                        )
-                      const totalBatchCount = () => batchUploads().length
-                      const completedBatchCount = () =>
-                        batchUploads().filter((u) => u.status === "success")
-                          .length
-                      const overallUploadProgress = () => {
-                        const list = batchUploads()
-                        if (list.length === 0) return 0
-                        const totalBytes = list.reduce(
-                          (acc, u) => acc + (u.size > 0 ? u.size : 0),
-                          0,
-                        )
-                        if (totalBytes > 0) {
-                          const loaded = list.reduce((acc, u) => {
-                            const size = u.size > 0 ? u.size : 0
-                            const pct =
-                              u.status === "success"
-                                ? 100
-                                : Number.isFinite(u.progress)
-                                  ? u.progress
-                                  : 0
-                            return acc + (size * pct) / 100
-                          }, 0)
-                          return Math.min(100, (loaded / totalBytes) * 100)
-                        }
-                        const sum = list.reduce((acc, u) => {
-                          const pct =
-                            u.status === "success"
-                              ? 100
-                              : Number.isFinite(u.progress)
-                                ? u.progress
-                                : 0
-                          return acc + pct
-                        }, 0)
-                        return Math.min(100, sum / list.length)
-                      }
-                      return (
-                        <Box
-                          p="$3"
-                          rounded="$md"
-                          border="1px solid"
-                          borderColor="$neutral5"
-                          bgColor="$neutral2"
-                          _hover={{ borderColor: "$info7" }}
-                          transition="border-color 0.2s"
-                        >
-                          <HStack justifyContent="space-between" mb="$2">
-                            <HStack spacing="$2" overflow="hidden" maxW="65%">
-                              <Badge colorScheme="info" flexShrink={0}>
-                                {isEn() ? "Upload" : "上传"}
-                              </Badge>
-                              <Text
-                                fontWeight="$semibold"
-                                fontSize="$sm"
-                                noOfLines={1}
-                              >
-                                {completedBatchCount() > 0
-                                  ? isEn()
-                                    ? `Uploading (${completedBatchCount()}/${totalBatchCount()})`
-                                    : `批量上传 (${completedBatchCount()}/${totalBatchCount()})`
-                                  : isEn()
-                                    ? `${totalBatchCount()} files`
-                                    : `批量上传 (${totalBatchCount()} 项)`}
-                              </Text>
-                            </HStack>
-                            <Badge colorScheme="success" flexShrink={0}>
-                              {getFileSize(totalSpeed())}/s
-                            </Badge>
-                          </HStack>
-                          <HStack spacing="$2" mb="$2">
-                            <Progress
-                              value={overallUploadProgress()}
-                              w="$full"
-                              size="sm"
-                              rounded="$full"
-                            >
-                              <ProgressIndicator
-                                color={
-                                  overallUploadProgress() >= 100
-                                    ? "$success9"
-                                    : "$info9"
-                                }
-                                rounded="$full"
-                              />
-                            </Progress>
-                            <Text
-                              fontSize="$xs"
-                              fontWeight="$medium"
-                              color="$neutral11"
-                              minW="40px"
-                              textAlign="right"
-                            >
-                              {overallUploadProgress().toFixed(0)}%
-                            </Text>
-                          </HStack>
-                          <HStack
-                            justifyContent="space-between"
-                            alignItems="center"
-                            spacing="$2"
-                          >
-                            <Button
-                              size="xs"
-                              variant="ghost"
-                              colorScheme="neutral"
-                              px="$1"
-                              onClick={() =>
-                                setUploadsExpanded((prev) => !prev)
-                              }
-                            >
-                              {uploadsExpanded()
-                                ? isEn()
-                                  ? "Hide details"
-                                  : "收起明细"
+                                >
+                                  {isEn() ? "Cancel" : "取消"}
+                                </Button>
+                              </HStack>
+                            </Box>
+                          )
+                        })()}
+                      >
+                        {(() => {
+                          const totalSpeed = () =>
+                            activeItems().reduce(
+                              (acc, u) =>
+                                acc + (Number.isFinite(u.speed) ? u.speed : 0),
+                              0,
+                            )
+                          const totalBatchCount = () =>
+                            Math.max(
+                              uploadBatch.total || 0,
+                              batchNonError().length,
+                            )
+                          const completedBatchCount = () =>
+                            Math.max(
+                              0,
+                              totalBatchCount() - activeItems().length,
+                            )
+                          const overallUploadProgress = () => {
+                            const list = batchNonError()
+                            if (list.length === 0) return 0
+                            const totalBytes = list.reduce(
+                              (acc, u) => acc + (u.size > 0 ? u.size : 0),
+                              0,
+                            )
+                            if (totalBytes > 0) {
+                              const loaded = list.reduce((acc, u) => {
+                                const size = u.size > 0 ? u.size : 0
+                                const pct =
+                                  u.status === "success"
+                                    ? 100
+                                    : Number.isFinite(u.progress)
+                                      ? u.progress
+                                      : 0
+                                return acc + (size * pct) / 100
+                              }, 0)
+                              return Math.min(100, (loaded / totalBytes) * 100)
+                            }
+                            const sum = list.reduce((acc, u) => {
+                              const pct =
+                                u.status === "success"
+                                  ? 100
+                                  : Number.isFinite(u.progress)
+                                    ? u.progress
+                                    : 0
+                              return acc + pct
+                            }, 0)
+                            return Math.min(100, sum / list.length)
+                          }
+                          const expanded = () =>
+                            !!uploadsExpanded()[uploadBatch.id]
+                          const titleText = () => {
+                            const countText =
+                              completedBatchCount() > 0
+                                ? `${completedBatchCount()}/${totalBatchCount()}`
                                 : isEn()
-                                  ? `Details (${activeUploads().length} left)`
-                                  : `展开明细 (剩余 ${activeUploads().length})`}
-                            </Button>
-                            <Button
-                              size="xs"
-                              colorScheme="danger"
-                              variant="subtle"
-                              onClick={() => cancelAllUploads()}
+                                  ? `${totalBatchCount()} files`
+                                  : `${totalBatchCount()} 项`
+                            if (uploadBatch.label) {
+                              return `${uploadBatch.label} (${countText})`
+                            }
+                            return isEn()
+                              ? `Uploading (${countText})`
+                              : `批量上传 (${countText})`
+                          }
+                          return (
+                            <Box
+                              p="$3"
+                              rounded="$md"
+                              border="1px solid"
+                              borderColor="$neutral5"
+                              bgColor="$neutral2"
+                              _hover={{ borderColor: "$info7" }}
+                              transition="border-color 0.2s"
                             >
-                              {isEn() ? "Cancel All" : "全部取消"}
-                            </Button>
-                          </HStack>
-                          <Show when={uploadsExpanded()}>
-                            <VStack
-                              spacing="$1_5"
-                              alignItems="stretch"
-                              mt="$2"
-                              pt="$2"
-                              borderTop="1px solid $neutral5"
-                              maxH="240px"
-                              overflowY="auto"
-                            >
-                              <For each={activeUploads()}>
-                                {(up) => (
-                                  <HStack
-                                    justifyContent="space-between"
-                                    alignItems="center"
-                                    spacing="$2"
-                                    px="$1"
-                                    py="$0_5"
-                                    rounded="$sm"
-                                    _hover={{ bgColor: "$neutral3" }}
+                              <HStack justifyContent="space-between" mb="$2">
+                                <HStack spacing="$2" overflow="hidden" maxW="65%">
+                                  <Badge colorScheme="info" flexShrink={0}>
+                                    {isEn() ? "Upload" : "上传"}
+                                  </Badge>
+                                  <Text
+                                    fontWeight="$semibold"
+                                    fontSize="$sm"
+                                    noOfLines={1}
+                                    title={uploadBatch.label || titleText()}
                                   >
-                                    <Text
-                                      fontSize="$xs"
-                                      noOfLines={1}
-                                      flex="1"
-                                      title={up.fullPath || up.path}
-                                    >
-                                      {up.path}
-                                    </Text>
-                                    <Text
-                                      fontSize="$xs"
-                                      color="$neutral9"
-                                      flexShrink={0}
-                                    >
-                                      {up.status === "pending"
-                                        ? isEn()
-                                          ? "Pending"
-                                          : "等待中"
-                                        : `${up.progress.toFixed(0)}%`}
-                                    </Text>
-                                    <Button
-                                      size="xs"
-                                      variant="ghost"
-                                      colorScheme="danger"
-                                      px="$1"
-                                      minW="auto"
-                                      h="$5"
-                                      onClick={() =>
-                                        cancelUpload(up.fullPath || up.path)
-                                      }
-                                    >
-                                      {isEn() ? "Cancel" : "取消"}
-                                    </Button>
-                                  </HStack>
-                                )}
-                              </For>
-                            </VStack>
-                          </Show>
-                        </Box>
-                      )
-                    })()}
-                  </Show>
-                </Show>
+                                    {titleText()}
+                                  </Text>
+                                </HStack>
+                                <Badge colorScheme="success" flexShrink={0}>
+                                  {getFileSize(totalSpeed())}/s
+                                </Badge>
+                              </HStack>
+                              <HStack spacing="$2" mb="$2">
+                                <Progress
+                                  value={overallUploadProgress()}
+                                  w="$full"
+                                  size="sm"
+                                  rounded="$full"
+                                >
+                                  <ProgressIndicator
+                                    color={
+                                      overallUploadProgress() >= 100
+                                        ? "$success9"
+                                        : "$info9"
+                                    }
+                                    rounded="$full"
+                                  />
+                                </Progress>
+                                <Text
+                                  fontSize="$xs"
+                                  fontWeight="$medium"
+                                  color="$neutral11"
+                                  minW="40px"
+                                  textAlign="right"
+                                >
+                                  {overallUploadProgress().toFixed(0)}%
+                                </Text>
+                              </HStack>
+                              <HStack
+                                justifyContent="space-between"
+                                alignItems="center"
+                                spacing="$2"
+                              >
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  colorScheme="neutral"
+                                  px="$1"
+                                  onClick={() =>
+                                    toggleUploadExpand(uploadBatch.id)
+                                  }
+                                >
+                                  {expanded()
+                                    ? isEn()
+                                      ? "Hide details"
+                                      : "收起明细"
+                                    : isEn()
+                                      ? `Details (${activeItems().length} left)`
+                                      : `展开明细 (剩余 ${activeItems().length})`}
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  colorScheme="danger"
+                                  variant="subtle"
+                                  onClick={() =>
+                                    cancelUploadBatch(uploadBatch.id)
+                                  }
+                                >
+                                  {isEn() ? "Cancel All" : "全部取消"}
+                                </Button>
+                              </HStack>
+                              <Show when={expanded()}>
+                                <VStack
+                                  spacing="$1_5"
+                                  alignItems="stretch"
+                                  mt="$2"
+                                  pt="$2"
+                                  borderTop="1px solid $neutral5"
+                                  maxH="240px"
+                                  overflowY="auto"
+                                >
+                                  <For each={activeItems()}>
+                                    {(up) => (
+                                      <HStack
+                                        justifyContent="space-between"
+                                        alignItems="center"
+                                        spacing="$2"
+                                        px="$1"
+                                        py="$0_5"
+                                        rounded="$sm"
+                                        _hover={{ bgColor: "$neutral3" }}
+                                      >
+                                        <Text
+                                          fontSize="$xs"
+                                          noOfLines={1}
+                                          flex="1"
+                                          title={up.fullPath || up.path}
+                                        >
+                                          {up.path}
+                                        </Text>
+                                        <Text
+                                          fontSize="$xs"
+                                          color="$neutral9"
+                                          flexShrink={0}
+                                        >
+                                          {up.status === "pending"
+                                            ? isEn()
+                                              ? "Pending"
+                                              : "等待中"
+                                            : `${up.progress.toFixed(0)}%`}
+                                        </Text>
+                                        <Button
+                                          size="xs"
+                                          variant="ghost"
+                                          colorScheme="danger"
+                                          px="$1"
+                                          minW="auto"
+                                          h="$5"
+                                          onClick={() =>
+                                            cancelUpload(up.fullPath || up.path)
+                                          }
+                                        >
+                                          {isEn() ? "Cancel" : "取消"}
+                                        </Button>
+                                      </HStack>
+                                    )}
+                                  </For>
+                                </VStack>
+                              </Show>
+                            </Box>
+                          )
+                        })()}
+                      </Show>
+                    )
+                  }}
+                </For>
                 <For each={groupedEntries()}>
                   {(entry) => (
                     <Show
@@ -867,7 +1035,7 @@ export const TasksDrawer = () => {
                       {(() => {
                         const total = () =>
                           Math.max(
-                            groupPeaks()[entry.key] ?? entry.tasks.length,
+                            groupTotals()[entry.key] ?? entry.tasks.length,
                             entry.tasks.length,
                           )
                         const remaining = () => entry.tasks.length
@@ -1069,15 +1237,7 @@ export const TasksDrawer = () => {
             onClick={() => {
               onClose()
               const firstType = tasks()[0]?.taskType
-              const target =
-                firstType === "decompress_upload" || firstType === "decompress"
-                  ? "decompress"
-                  : firstType === "move"
-                    ? "move"
-                    : firstType === "upload" ||
-                        (!firstType && activeUploads().length > 0)
-                      ? "upload"
-                      : "copy"
+              const target = firstType === "move" ? "move" : "copy"
               to(`/@manage/tasks/${target}`)
             }}
           >

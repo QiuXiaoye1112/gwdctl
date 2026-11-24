@@ -15,7 +15,6 @@ import {
   selectedObjs,
   userCan,
 } from "~/store"
-import { isArchive } from "~/store/archive"
 
 const ItemContent = (props: { name: string }) => {
   const t = useT()
@@ -70,22 +69,6 @@ export const ContextMenu = () => {
         }}
       >
         <ItemContent name="share" />
-      </Item>
-      <Item
-        hidden={() => {
-          return (
-            isShare() ||
-            !userCan("decompress") ||
-            !objStore.write ||
-            selectedObjs().some((o) => o.is_dir) ||
-            selectedObjs().some((o) => !isArchive(o.name))
-          )
-        }}
-        onClick={() => {
-          bus.emit("tool", "decompress")
-        }}
-      >
-        <ItemContent name="decompress" />
       </Item>
       <Show when={oneChecked() || selectedObjs().some((o) => o.is_dir)}>
         <Item

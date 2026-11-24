@@ -25,7 +25,6 @@ type FileStream struct {
 	model.Obj
 	io.Reader
 	Mimetype          string
-	WebPutAsTask      bool
 	ForceStreamUpload bool
 	Exist             model.Obj //the file existed in the destination, we can reuse some info since we wil overwrite it
 	utils.Closers
@@ -47,7 +46,7 @@ func (f *FileStream) GetMimetype() string {
 }
 
 func (f *FileStream) NeedStore() bool {
-	return f.WebPutAsTask
+	return false
 }
 
 func (f *FileStream) IsForceStreamUpload() bool {

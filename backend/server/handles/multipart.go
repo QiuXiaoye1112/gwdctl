@@ -79,9 +79,13 @@ func MultipartInit(c *gin.Context) {
 			return
 		}
 	}
-	overwrite := c.GetHeader("Overwrite") != "false"
-	if !overwrite {
+	overwriteHeader := c.GetHeader("Overwrite")
+	if overwriteHeader == "skip" || overwriteHeader == "false" {
 		if res, _ := fs.Get(c.Request.Context(), path, &fs.GetArgs{NoLog: true}); res != nil {
+			if overwriteHeader == "skip" {
+				common.SuccessResp(c, gin.H{"skipped": true})
+				return
+			}
 			common.ErrorStrResp(c, "file exists", 403)
 			return
 		}

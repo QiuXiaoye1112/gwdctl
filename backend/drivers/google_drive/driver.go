@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/OpenListTeam/OpenList/v4/drivers/base"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
@@ -21,6 +22,7 @@ type GoogleDrive struct {
 	model.Storage
 	Addition
 	AccessToken string
+	tokenExpiry time.Time
 	tokenMu     sync.RWMutex
 	refreshMu   sync.Mutex
 	sizeIdxOnce sync.Once
@@ -36,8 +38,8 @@ func (d *GoogleDrive) GetAddition() driver.Additional {
 }
 
 func (d *GoogleDrive) Init(ctx context.Context) error {
-	if d.ChunkSize == 0 {
-		d.ChunkSize = 5
+	if d.ChunkSize <= 0 {
+		d.ChunkSize = 16
 	}
 	if err := d.refreshToken(); err != nil {
 		return err
@@ -97,36 +99,85 @@ func (d *GoogleDrive) List(ctx context.Context, dir model.Obj, args model.ListAr
 	})
 }
 
+type NativeMimeTypeObj interface {
+	GetNativeMimeType() string
+}
+
+func getNativeMimeType(obj model.Obj) string {
+	for obj != nil {
+		if m, ok := obj.(NativeMimeTypeObj); ok && m.GetNativeMimeType() != "" {
+			return m.GetNativeMimeType()
+		}
+		if unwrap, ok := obj.(model.ObjUnwrap); ok {
+			obj = unwrap.Unwrap()
+		} else {
+			break
+		}
+	}
+	return ""
+}
+
 func (d *GoogleDrive) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
-	fileURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?includeItemsFromAllDrives=true&supportsAllDrives=true", getReadID(file))
-	var metadata File
-	_, err := d.requestWithContext(ctx, fileURL, http.MethodGet, nil, &metadata)
-	if err != nil {
-		return nil, err
+	readID := getReadID(file)
+	fileURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?includeItemsFromAllDrives=true&supportsAllDrives=true", readID)
+	mimeType := getNativeMimeType(file)
+	var token string
+	if mimeType == "" {
+		var metadata File
+		_, err := d.requestWithContext(ctx, fileURL, http.MethodGet, func(req *resty.Request) {
+			req.SetQueryParam("fields", "mimeType")
+		}, &metadata)
+		if err != nil {
+			return nil, err
+		}
+		mimeType = metadata.MimeType
+		token = d.getAccessToken()
+	} else {
+		var err error
+		token, err = d.ensureValidToken()
+		if err != nil {
+			return nil, err
+		}
 	}
 	contentURL := fileURL + "&alt=media&acknowledgeAbuse=true"
-	if metadata.MimeType == "application/vnd.google-apps.document" {
-		contentURL = fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s/export?mimeType=%s", getReadID(file), url.QueryEscape("text/markdown"))
+	if mimeType == "application/vnd.google-apps.document" {
+		contentURL = fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s/export?mimeType=%s", readID, url.QueryEscape("text/markdown"))
 	}
 	link := model.Link{
 		URL: contentURL,
 		Header: http.Header{
-			"Authorization": []string{"Bearer " + d.getAccessToken()},
+			"Authorization": []string{"Bearer " + token},
 		},
+	}
+	if ttl := d.tokenRemainingTTL(); ttl > 0 {
+		exp := min(ttl, 5*time.Minute)
+		link.Expiration = &exp
 	}
 	return &link, nil
 }
 
-func (d *GoogleDrive) MakeDir(ctx context.Context, parentDir model.Obj, dirName string) error {
+func (d *GoogleDrive) MakeDir(ctx context.Context, parentDir model.Obj, dirName string) (model.Obj, error) {
 	data := base.Json{
 		"name":     dirName,
 		"parents":  []string{getReadID(parentDir)},
 		"mimeType": "application/vnd.google-apps.folder",
 	}
+	var created File
 	_, err := d.requestWithContext(ctx, "https://www.googleapis.com/drive/v3/files", http.MethodPost, func(req *resty.Request) {
+		req.SetQueryParam("fields", "id,name,mimeType,size,modifiedTime,createdTime")
 		req.SetBody(data)
-	}, nil)
-	return err
+	}, &created)
+	if err != nil {
+		return nil, err
+	}
+	if created.Id == "" {
+		return nil, nil
+	}
+	obj := fileToObj(created)
+	if gdObj, ok := obj.(*GoogleDriveObj); ok {
+		gdObj.sizeIndex = d.getSizeIndex()
+	}
+	return obj, nil
 }
 
 func (d *GoogleDrive) Move(ctx context.Context, srcObj, dstDir model.Obj) error {
@@ -201,6 +252,10 @@ func (d *GoogleDrive) Remove(ctx context.Context, obj model.Obj) error {
 
 func (d *GoogleDrive) Put(ctx context.Context, dstDir model.Obj, stream model.FileStreamer, up driver.UpdateProgress) error {
 	obj := stream.GetExist()
+	if stream.GetSize() >= 0 && stream.GetSize() <= smallUploadThreshold {
+		return d.uploadSmallFile(ctx, dstDir, stream, obj, up)
+	}
+
 	var (
 		apiURL string
 		data   base.Json
@@ -217,7 +272,13 @@ func (d *GoogleDrive) Put(ctx context.Context, dstDir model.Obj, stream model.Fi
 	}
 
 	var putUrl string
-	for attempt := 0; attempt < 2; attempt++ {
+	refreshed := false
+	for retryAttempt := 0; ; {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		var e Error
 		token := d.getAccessToken()
 		req := base.NoRedirectClient.R().
@@ -240,15 +301,30 @@ func (d *GoogleDrive) Put(ctx context.Context, dstDir model.Obj, stream model.Fi
 			res, err = req.Post(apiURL)
 		}
 		if err != nil {
+			if retryAttempt < maxGoogleRetries {
+				if sleepErr := retrySleep(ctx, googleBackoffDelay(retryAttempt, "")); sleepErr != nil {
+					return sleepErr
+				}
+				retryAttempt++
+				continue
+			}
 			return err
 		}
-		if (res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401) && attempt == 0 {
+		if (res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401) && !refreshed {
+			refreshed = true
 			if err = d.refreshTokenIfNeeded(token); err != nil {
 				return err
 			}
 			continue
 		}
 		if res.IsError() {
+			if isRetryableGoogleStatus(res.StatusCode(), res.Body(), &e) && retryAttempt < maxGoogleRetries {
+				if sleepErr := retrySleep(ctx, googleBackoffDelay(retryAttempt, res.Header().Get("Retry-After"))); sleepErr != nil {
+					return sleepErr
+				}
+				retryAttempt++
+				continue
+			}
 			if e.Error.Code != 0 {
 				return fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
 			}
@@ -296,4 +372,7 @@ func (d *GoogleDrive) GetDetails(ctx context.Context) (*model.StorageDetails, er
 	}, nil
 }
 
-var _ driver.Driver = (*GoogleDrive)(nil)
+var (
+	_ driver.Driver      = (*GoogleDrive)(nil)
+	_ driver.MkdirResult = (*GoogleDrive)(nil)
+)

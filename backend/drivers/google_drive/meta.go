@@ -12,7 +12,7 @@ type Addition struct {
 	RefreshToken     string `json:"refresh_token" required:"true"`
 	OrderBy          string `json:"order_by" type:"string" help:"such as: folder,name,modifiedTime"`
 	OrderDirection   string `json:"order_direction" type:"select" options:"asc,desc"`
-	ChunkSize        int64  `json:"chunk_size" type:"number" default:"5" help:"chunk size while uploading (unit: MB)"`
+	ChunkSize        int64  `json:"chunk_size" type:"number" default:"16" help:"chunk size while uploading (unit: MB)"`
 	DisableDiskUsage bool   `json:"disable_disk_usage" default:"false"`
 }
 

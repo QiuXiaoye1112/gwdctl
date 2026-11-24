@@ -12,8 +12,8 @@ import { ModalWrapper } from "./ModalWrapper"
 import { LocalSettings } from "./LocalSettings"
 import { TasksDrawer } from "./TasksDrawer"
 import { BackTop } from "./BackTop"
-import { Decompress } from "./Decompress"
 import { Share } from "./Share"
+import { UploadConflictModal } from "../uploads/UploadConflictModal"
 
 const Upload = lazy(() => import("../uploads/Upload"))
 
@@ -24,7 +24,6 @@ export const Modal = () => {
       <Move />
       <Rename />
       <Delete />
-      <Decompress />
       <Mkdir />
       <Share />
       <RemoveEmptyDirectory />
@@ -33,6 +32,7 @@ export const Modal = () => {
       <ModalWrapper name="upload" title="home.toolbar.upload">
         <Upload />
       </ModalWrapper>
+      <UploadConflictModal />
       <LocalSettings />
       <TasksDrawer />
     </>

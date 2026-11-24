@@ -14,6 +14,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/pkg/generic"
 	"github.com/OpenListTeam/OpenList/v4/server/common"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -199,13 +200,35 @@ func handleMoveCopy(c *gin.Context, isCopy bool) {
 	if isCopy {
 		opLabel = "copy"
 	}
+	validCount := 0
+	firstSrc := ""
+	for _, p := range req.Names {
+		if p == "" {
+			continue
+		}
+		if validCount == 0 {
+			firstSrc = p
+		}
+		validCount++
+	}
+	batchID := uuid.NewString()
+	batchLabel := stdpath.Base(dstDir)
+	if batchLabel == "" || batchLabel == "." {
+		batchLabel = "/"
+	}
+	if validCount == 1 && firstSrc != "" {
+		batchLabel = stdpath.Base(firstSrc)
+	}
+
 	for i, p := range req.Names {
 		if p == "" {
 			continue
 		}
 		opts := fs.TransferOptions{
-			SkipHook:  len(req.Names) > i+1,
-			Overwrite: req.Overwrite,
+			SkipHook:   len(req.Names) > i+1,
+			Overwrite:  req.Overwrite,
+			BatchID:    batchID,
+			BatchLabel: batchLabel,
 		}
 		var t task.TaskExtensionInfo
 		if isCopy {
@@ -225,7 +248,7 @@ func handleMoveCopy(c *gin.Context, isCopy bool) {
 			return
 		}
 		if req.FollowSeed {
-			seedTasks, followErr := followSeedTransfer(c, opLabel, p, dstDir, dstByName, req.Overwrite, req.SkipExisting)
+			seedTasks, followErr := followSeedTransfer(c, opLabel, p, dstDir, dstByName, req.Overwrite, req.SkipExisting, batchID, batchLabel)
 			if followErr != nil {
 				common.ErrorResp(c, followErr, 500)
 				return
@@ -442,13 +465,18 @@ func checkFollowSeedConflicts(c *gin.Context, srcPath string, dstByName map[stri
 	return nil
 }
 
-func followSeedTransfer(c *gin.Context, operation, srcPath, dstDir string, dstByName map[string][]model.Obj, overwrite, skipExisting bool) ([]task.TaskExtensionInfo, error) {
+func followSeedTransfer(c *gin.Context, operation, srcPath, dstDir string, dstByName map[string][]model.Obj, overwrite, skipExisting bool, batchID, batchLabel string) ([]task.TaskExtensionInfo, error) {
 	source, err := fs.Get(c.Request.Context(), srcPath, &fs.GetArgs{NoLog: true})
 	if err != nil || source == nil || source.IsDir() {
 		return nil, nil
 	}
 	var tasks []task.TaskExtensionInfo
-	opts := fs.TransferOptions{SkipHook: true, Overwrite: overwrite}
+	opts := fs.TransferOptions{
+		SkipHook:   true,
+		Overwrite:  overwrite,
+		BatchID:    batchID,
+		BatchLabel: batchLabel,
+	}
 	for _, sidecarPath := range seedSidecarPaths(srcPath) {
 		obj, err := fs.Get(c.Request.Context(), sidecarPath, &fs.GetArgs{NoLog: true})
 		if err != nil || obj == nil || obj.IsDir() {

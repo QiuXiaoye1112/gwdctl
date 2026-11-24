@@ -387,10 +387,4 @@ export const smartCountMsg = (filterType?: ObjType) => {
     : countMsg(filterType)
 }
 
-export const [uploadConfig, setUploadConfig] = createStore({
-  asTask: false,
-  overwrite: false,
-  rapid: true,
-})
-
 export const [shouldKeepState, setShouldKeepState] = createSignal(false)

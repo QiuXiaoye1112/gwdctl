@@ -71,8 +71,10 @@ func MakeDir(ctx context.Context, path string) error {
 
 // TransferOptions configures conflict and hook behavior for Move, Copy, CopyTo, and Merge tasks.
 type TransferOptions struct {
-	SkipHook  bool
-	Overwrite bool
+	SkipHook   bool
+	Overwrite  bool
+	BatchID    string
+	BatchLabel string
 }
 
 func Move(ctx context.Context, srcPath, dstDirPath string, skipHook ...bool) (task.TaskExtensionInfo, error) {
@@ -152,14 +154,6 @@ func PutDirectly(ctx context.Context, dstDirPath string, file model.FileStreamer
 	return err
 }
 
-func PutAsTask(ctx context.Context, dstDirPath string, file model.FileStreamer) (task.TaskExtensionInfo, error) {
-	t, err := putAsTask(ctx, dstDirPath, file)
-	if err != nil {
-		log.Errorf("failed put %s: %+v", dstDirPath, err)
-	}
-	return t, err
-}
-
 func ArchiveMeta(ctx context.Context, path string, args model.ArchiveMetaArgs) (*model.ArchiveMetaProvider, error) {
 	meta, err := archiveMeta(ctx, path, args)
 	if err != nil {
@@ -174,14 +168,6 @@ func ArchiveList(ctx context.Context, path string, args model.ArchiveListArgs) (
 		log.Errorf("failed list archive [%s]%s: %+v", path, args.InnerPath, err)
 	}
 	return objs, err
-}
-
-func ArchiveDecompress(ctx context.Context, srcObjPath, dstDirPath string, args model.ArchiveDecompressArgs, lazyCache ...bool) (task.TaskExtensionInfo, error) {
-	t, err := archiveDecompress(ctx, srcObjPath, dstDirPath, args, lazyCache...)
-	if err != nil {
-		log.Errorf("failed decompress [%s]%s: %+v", srcObjPath, args.InnerPath, err)
-	}
-	return t, err
 }
 
 func ArchiveDriverExtract(ctx context.Context, path string, args model.ArchiveInnerArgs) (*model.Link, model.Obj, error) {

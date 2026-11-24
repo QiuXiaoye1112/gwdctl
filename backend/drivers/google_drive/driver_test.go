@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -889,5 +892,391 @@ func TestListAttachesDynamicFolderSizeIndex(t *testing.T) {
 	}
 	if got := byName["hello.txt"].GetSize(); got != 100 {
 		t.Fatalf("expected hello.txt size 100, got %d", got)
+	}
+}
+
+type failIfCalledTransport struct {
+	calls int
+}
+
+func (f *failIfCalledTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.calls++
+	return nil, fmt.Errorf("unexpected HTTP request to %s", r.URL.String())
+}
+
+func TestLinkSkipsMetadataRequestForGoogleDriveObj(t *testing.T) {
+	old := base.RestyClient
+	defer func() { base.RestyClient = old }()
+
+	tr := &failIfCalledTransport{}
+	base.RestyClient = resty.New().SetTransport(tr)
+	d := &GoogleDrive{
+		AccessToken: "cached-token",
+		tokenExpiry: time.Now().Add(30 * time.Minute),
+	}
+
+	imgObj := fileToObj(File{
+		Id:       "img-1",
+		Name:     "photo.jpg",
+		MimeType: "image/jpeg",
+		Size:     "2048",
+	})
+	wrappedImg := &model.ObjWrapName{Name: "photo.jpg", Obj: imgObj}
+	link, err := d.Link(context.Background(), wrappedImg, model.LinkArgs{})
+	if err != nil {
+		t.Fatalf("Link failed for GoogleDriveObj image: %v", err)
+	}
+	if tr.calls != 0 {
+		t.Fatalf("expected 0 metadata HTTP calls, got %d", tr.calls)
+	}
+	u, err := url.Parse(link.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Path != "/drive/v3/files/img-1" || u.Query().Get("alt") != "media" {
+		t.Fatalf("unexpected image download URL: %s", link.URL)
+	}
+	if got := link.Header.Get("Authorization"); got != "Bearer cached-token" {
+		t.Fatalf("unexpected Authorization header: %q", got)
+	}
+	if link.Expiration == nil || *link.Expiration <= 0 || *link.Expiration > 5*time.Minute {
+		t.Fatalf("unexpected link expiration: %v", link.Expiration)
+	}
+
+	docObj := fileToObj(File{
+		Id:       "gdoc-1",
+		Name:     "Notes",
+		MimeType: "application/vnd.google-apps.document",
+	})
+	docLink, err := d.Link(context.Background(), docObj, model.LinkArgs{})
+	if err != nil {
+		t.Fatalf("Link failed for GoogleDriveObj document: %v", err)
+	}
+	if tr.calls != 0 {
+		t.Fatalf("expected 0 metadata HTTP calls for doc, got %d", tr.calls)
+	}
+	du, err := url.Parse(docLink.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if du.Path != "/drive/v3/files/gdoc-1/export" || du.Query().Get("mimeType") != "text/markdown" {
+		t.Fatalf("unexpected doc export URL: %s", docLink.URL)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestPutSmallFileUsesMultipartUpload(t *testing.T) {
+	oldClient := base.HttpClient
+	defer func() { base.HttpClient = oldClient }()
+
+	payloadBytes := []byte("hello small google drive file!")
+	var gotMethod, gotURL, gotMetaName, gotMetaParent string
+	var gotBody []byte
+	var calls int32
+
+	base.HttpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			atomic.AddInt32(&calls, 1)
+			gotMethod = r.Method
+			gotURL = r.URL.String()
+
+			mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || mediaType != "multipart/related" {
+				t.Fatalf("expected multipart/related Content-Type, got %q (err=%v)", r.Header.Get("Content-Type"), err)
+			}
+			mr := multipart.NewReader(r.Body, params["boundary"])
+
+			p1, err := mr.NextPart()
+			if err != nil {
+				t.Fatalf("missing metadata part: %v", err)
+			}
+			var meta struct {
+				Name    string   `json:"name"`
+				Parents []string `json:"parents"`
+			}
+			if err := json.NewDecoder(p1).Decode(&meta); err != nil {
+				t.Fatalf("decode metadata part: %v", err)
+			}
+			gotMetaName = meta.Name
+			if len(meta.Parents) > 0 {
+				gotMetaParent = meta.Parents[0]
+			}
+
+			p2, err := mr.NextPart()
+			if err != nil {
+				t.Fatalf("missing media part: %v", err)
+			}
+			gotBody, err = io.ReadAll(p2)
+			if err != nil {
+				t.Fatalf("read media part: %v", err)
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"small-1","name":"note.txt"}`)),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	d := &GoogleDrive{AccessToken: "test-token"}
+	defer d.Drop(context.Background())
+
+	streamer := &stream.FileStream{
+		Obj: &model.Object{
+			Name: "note.txt",
+			Size: int64(len(payloadBytes)),
+		},
+		Reader:   bytes.NewReader(payloadBytes),
+		Mimetype: "text/plain",
+	}
+	var progress float64
+	err := d.Put(context.Background(), &model.Object{ID: "parent-dir-1", IsFolder: true}, streamer, func(p float64) {
+		progress = p
+	})
+	if err != nil {
+		t.Fatalf("Put small file failed: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected single HTTP call, got %d", calls)
+	}
+	if gotMethod != http.MethodPost || !strings.Contains(gotURL, "uploadType=multipart") {
+		t.Fatalf("unexpected request: %s %s", gotMethod, gotURL)
+	}
+	if gotMetaName != "note.txt" || gotMetaParent != "parent-dir-1" {
+		t.Fatalf("unexpected metadata: name=%q parent=%q", gotMetaName, gotMetaParent)
+	}
+	if !bytes.Equal(gotBody, payloadBytes) {
+		t.Fatalf("uploaded content mismatch: got %q", gotBody)
+	}
+	if progress != 100 {
+		t.Fatalf("expected progress 100, got %v", progress)
+	}
+}
+
+func TestPutSmallFileOverwriteUsesMediaPatch(t *testing.T) {
+	oldClient := base.HttpClient
+	defer func() { base.HttpClient = oldClient }()
+
+	payloadBytes := []byte("updated content")
+	var gotMethod, gotURL string
+	var gotBody []byte
+
+	base.HttpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			gotMethod = r.Method
+			gotURL = r.URL.String()
+			gotBody, _ = io.ReadAll(r.Body)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"exist-1"}`)),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	d := &GoogleDrive{AccessToken: "test-token"}
+	defer d.Drop(context.Background())
+
+	streamer := &stream.FileStream{
+		Obj: &model.Object{
+			Name: "photo.jpg",
+			Size: int64(len(payloadBytes)),
+		},
+		Exist:    &model.Object{ID: "exist-1", Name: "photo.jpg"},
+		Reader:   bytes.NewReader(payloadBytes),
+		Mimetype: "image/jpeg",
+	}
+	if err := d.Put(context.Background(), &model.Object{ID: "parent-1", IsFolder: true}, streamer, nil); err != nil {
+		t.Fatalf("Put overwrite failed: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("expected PATCH for overwrite, got %s", gotMethod)
+	}
+	if !strings.Contains(gotURL, "/files/exist-1") || !strings.Contains(gotURL, "uploadType=media") {
+		t.Fatalf("unexpected overwrite URL: %s", gotURL)
+	}
+	if !bytes.Equal(gotBody, payloadBytes) {
+		t.Fatalf("unexpected body: %q", gotBody)
+	}
+}
+
+func TestPutSmallFileRetriesOnRateLimitAnd5xx(t *testing.T) {
+	oldClient := base.HttpClient
+	oldSleep := retrySleep
+	defer func() {
+		base.HttpClient = oldClient
+		retrySleep = oldSleep
+	}()
+
+	var sleeps int
+	retrySleep = func(ctx context.Context, d time.Duration) error {
+		sleeps++
+		return nil
+	}
+
+	var attempts int32
+	base.HttpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			n := atomic.AddInt32(&attempts, 1)
+			_, _ = io.Copy(io.Discard, r.Body)
+			switch n {
+			case 1:
+				return &http.Response{
+					StatusCode: http.StatusForbidden,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"error":{"code":403,"message":"Rate Limit","errors":[{"reason":"userRateLimitExceeded"}]}}`)),
+					Request:    r,
+				}, nil
+			case 2:
+				return &http.Response{
+					StatusCode: http.StatusServiceUnavailable,
+					Header:     http.Header{},
+					Body:       io.NopCloser(strings.NewReader(`service unavailable`)),
+					Request:    r,
+				}, nil
+			default:
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"id":"ok-1"}`)),
+					Request:    r,
+				}, nil
+			}
+		}),
+	}
+
+	d := &GoogleDrive{AccessToken: "test-token"}
+	defer d.Drop(context.Background())
+
+	streamer := &stream.FileStream{
+		Obj:      &model.Object{Name: "retry.txt", Size: 5},
+		Reader:   strings.NewReader("hello"),
+		Mimetype: "text/plain",
+	}
+	if err := d.Put(context.Background(), &model.Object{ID: "dir-1", IsFolder: true}, streamer, nil); err != nil {
+		t.Fatalf("expected retryable small upload to succeed, got %v", err)
+	}
+	if attempts != 3 || sleeps != 2 {
+		t.Fatalf("expected 3 attempts and 2 sleeps, got attempts=%d sleeps=%d", attempts, sleeps)
+	}
+
+	// Non-retryable 403 (storageQuotaExceeded) should fail immediately without sleeping.
+	var nonRetryCalls int32
+	sleeps = 0
+	base.HttpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			atomic.AddInt32(&nonRetryCalls, 1)
+			_, _ = io.Copy(io.Discard, r.Body)
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":403,"message":"Quota exceeded","errors":[{"reason":"storageQuotaExceeded"}]}}`)),
+				Request:    r,
+			}, nil
+		}),
+	}
+	streamer2 := &stream.FileStream{
+		Obj:      &model.Object{Name: "fail.txt", Size: 5},
+		Reader:   strings.NewReader("hello"),
+		Mimetype: "text/plain",
+	}
+	if err := d.Put(context.Background(), &model.Object{ID: "dir-1", IsFolder: true}, streamer2, nil); err == nil {
+		t.Fatalf("expected storageQuotaExceeded to fail")
+	}
+	if nonRetryCalls != 1 || sleeps != 0 {
+		t.Fatalf("expected immediate failure without retries, got calls=%d sleeps=%d", nonRetryCalls, sleeps)
+	}
+}
+
+func TestChunkUploadRetriesOnRateLimit(t *testing.T) {
+	oldClient := base.HttpClient
+	oldSleep := retrySleep
+	defer func() {
+		base.HttpClient = oldClient
+		retrySleep = oldSleep
+	}()
+
+	var sleeps int
+	retrySleep = func(ctx context.Context, d time.Duration) error {
+		sleeps++
+		return nil
+	}
+
+	var calls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		switch n {
+		case 1:
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`too many requests`))
+		case 2:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":403,"message":"User rate limit","errors":[{"reason":"userRateLimitExceeded"}]}}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"chunk-ok"}`))
+		}
+	}))
+	defer ts.Close()
+	base.HttpClient = ts.Client()
+
+	data := make([]byte, 6*1024*1024)
+	d := &GoogleDrive{
+		Addition:    Addition{ChunkSize: 16},
+		AccessToken: "test-token",
+	}
+	streamer := &stream.FileStream{
+		Obj:    &model.Object{Name: "large.bin", Size: int64(len(data))},
+		Reader: bytes.NewReader(data),
+	}
+	var progress float64
+	if err := d.chunkUpload(context.Background(), streamer, ts.URL, func(p float64) { progress = p }); err != nil {
+		t.Fatalf("chunkUpload rate-limit retry failed: %v", err)
+	}
+	if calls != 3 || sleeps != 2 || progress != 100 {
+		t.Fatalf("unexpected counts: calls=%d sleeps=%d progress=%v", calls, sleeps, progress)
+	}
+}
+
+func TestMakeDirReturnsCreatedObj(t *testing.T) {
+	oldResty := base.RestyClient
+	defer func() { base.RestyClient = oldResty }()
+
+	base.RestyClient = resty.New().SetTransport(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || !strings.Contains(r.URL.Path, "/drive/v3/files") {
+			t.Fatalf("unexpected MakeDir request: %s %s", r.Method, r.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"folder-99","name":"SubFolder","mimeType":"application/vnd.google-apps.folder"}`,
+			)),
+			Request: r,
+		}, nil
+	}))
+
+	d := &GoogleDrive{AccessToken: "test-token"}
+	defer d.Drop(context.Background())
+
+	obj, err := d.MakeDir(context.Background(), &model.Object{ID: "parent-1", IsFolder: true}, "SubFolder")
+	if err != nil {
+		t.Fatalf("MakeDir failed: %v", err)
+	}
+	if obj == nil {
+		t.Fatalf("expected created obj, got nil")
+	}
+	if obj.GetID() != "folder-99" || obj.GetName() != "SubFolder" || !obj.IsDir() {
+		t.Fatalf("unexpected created obj: id=%q name=%q isDir=%v", obj.GetID(), obj.GetName(), obj.IsDir())
 	}
 }

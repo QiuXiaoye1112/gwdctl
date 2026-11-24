@@ -10,4 +10,6 @@ export interface TaskInfo {
   end_time: string | null
   total_bytes: number
   error: string
+  batch_id?: string
+  batch_label?: string
 }

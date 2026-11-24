@@ -110,9 +110,16 @@ export const Copy = () => {
           if (succeeded) {
             const taskIds =
               resp.data?.tasks?.map((task) => task.id).filter(Boolean) ?? []
+            const batchIds = Array.from(
+              new Set(
+                resp.data?.tasks
+                  ?.map((task) => task.batch_id)
+                  .filter((id): id is string => Boolean(id)) ?? [],
+              ),
+            )
             if (taskIds.length > 0) {
               onClose()
-              bus.emit("track_tasks", { type: "copy", ids: taskIds })
+              bus.emit("track_tasks", { type: "copy", ids: taskIds, batchIds })
             } else {
               bus.emit("tool", "tasks_refresh")
               await refresh(false, true)
@@ -201,9 +208,16 @@ export const Move = () => {
           if (succeeded) {
             const taskIds =
               resp.data?.tasks?.map((task) => task.id).filter(Boolean) ?? []
+            const batchIds = Array.from(
+              new Set(
+                resp.data?.tasks
+                  ?.map((task) => task.batch_id)
+                  .filter((id): id is string => Boolean(id)) ?? [],
+              ),
+            )
             if (taskIds.length > 0) {
               onClose()
-              bus.emit("track_tasks", { type: "move", ids: taskIds })
+              bus.emit("track_tasks", { type: "move", ids: taskIds, batchIds })
             } else {
               bus.emit("tool", "tasks_refresh")
               await refresh(false, true)

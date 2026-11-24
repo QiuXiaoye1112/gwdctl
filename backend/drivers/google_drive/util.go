@@ -1,11 +1,17 @@
 package google_drive
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +47,50 @@ func (d *GoogleDrive) setAccessToken(token string) {
 	d.tokenMu.Unlock()
 }
 
+func (d *GoogleDrive) setAccessTokenWithExpiry(token string, ttl time.Duration) {
+	d.tokenMu.Lock()
+	d.AccessToken = token
+	if ttl > 0 {
+		d.tokenExpiry = time.Now().Add(ttl)
+	} else {
+		d.tokenExpiry = time.Time{}
+	}
+	d.tokenMu.Unlock()
+}
+
+func (d *GoogleDrive) tokenRemainingTTL() time.Duration {
+	d.tokenMu.RLock()
+	expiry := d.tokenExpiry
+	d.tokenMu.RUnlock()
+	if expiry.IsZero() {
+		return 0
+	}
+	return time.Until(expiry)
+}
+
+func (d *GoogleDrive) ensureValidToken() (string, error) {
+	d.tokenMu.RLock()
+	token := d.AccessToken
+	expiry := d.tokenExpiry
+	d.tokenMu.RUnlock()
+	if token != "" && (expiry.IsZero() || time.Now().Before(expiry)) {
+		return token, nil
+	}
+	if err := d.refreshTokenIfNeeded(token); err != nil {
+		return "", err
+	}
+	return d.getAccessToken(), nil
+}
+
+// InvalidateAccessToken marks the cached OAuth access token expired if it matches failedToken.
+func (d *GoogleDrive) InvalidateAccessToken(failedToken string) {
+	d.tokenMu.Lock()
+	if failedToken == "" || d.AccessToken == failedToken {
+		d.tokenExpiry = time.Now().Add(-time.Second)
+	}
+	d.tokenMu.Unlock()
+}
+
 func (d *GoogleDrive) refreshToken() error {
 	return d.refreshTokenIfNeeded("")
 }
@@ -49,14 +99,23 @@ func (d *GoogleDrive) refreshTokenIfNeeded(failedToken string) error {
 	d.refreshMu.Lock()
 	defer d.refreshMu.Unlock()
 
-	if failedToken != "" && d.getAccessToken() != failedToken {
-		return nil
+	if failedToken != "" {
+		d.tokenMu.RLock()
+		curToken := d.AccessToken
+		curExpiry := d.tokenExpiry
+		d.tokenMu.RUnlock()
+		if curToken != "" && curToken != failedToken && (curExpiry.IsZero() || time.Now().Before(curExpiry)) {
+			return nil
+		}
 	}
 	if d.ClientID == "" || d.ClientSecret == "" || d.RefreshToken == "" {
 		return fmt.Errorf("empty ClientID, ClientSecret or RefreshToken")
 	}
 	tokenURL := "https://www.googleapis.com/oauth2/v4/token"
-	var resp base.TokenResp
+	var resp struct {
+		base.TokenResp
+		ExpiresIn int `json:"expires_in"`
+	}
 	var e TokenError
 	res, err := base.RestyClient.R().SetResult(&resp).SetError(&e).
 		SetFormData(map[string]string{
@@ -75,8 +134,99 @@ func (d *GoogleDrive) refreshTokenIfNeeded(failedToken string) error {
 	if resp.AccessToken == "" {
 		return fmt.Errorf("token refresh returned empty access token (HTTP %d)", res.StatusCode())
 	}
-	d.setAccessToken(resp.AccessToken)
+	ttl := 50 * time.Minute
+	if resp.ExpiresIn > 180 {
+		ttl = time.Duration(resp.ExpiresIn-120) * time.Second
+	}
+	d.setAccessTokenWithExpiry(resp.AccessToken, ttl)
 	return nil
+}
+
+const (
+	smallUploadThreshold = 5 * 1024 * 1024 // 5 MiB
+	maxGoogleRetries     = 4
+	retryBaseDelay       = 250 * time.Millisecond
+	retryMaxDelay        = 8 * time.Second
+)
+
+var retrySleep = defaultRetrySleep
+
+func defaultRetrySleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	if ctx == nil {
+		time.Sleep(d)
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func googleBackoffDelay(attempt int, retryAfter string) time.Duration {
+	if retryAfter != "" {
+		if secs, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && secs > 0 {
+			d := time.Duration(secs) * time.Second
+			if d > retryMaxDelay {
+				return retryMaxDelay
+			}
+			return d
+		}
+	}
+	if attempt < 0 {
+		attempt = 0
+	}
+	if attempt > 6 {
+		attempt = 6
+	}
+	delay := retryBaseDelay << attempt
+	if delay > retryMaxDelay {
+		delay = retryMaxDelay
+	}
+	half := delay / 2
+	if half <= 0 {
+		return delay
+	}
+	return half + time.Duration(rand.Int63n(int64(half)+1))
+}
+
+func isRetryableGoogleReason(reason string) bool {
+	switch reason {
+	case "rateLimitExceeded",
+		"userRateLimitExceeded",
+		"sharingRateLimitExceeded",
+		"backendError",
+		"internalError":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRetryableGoogleStatus(statusCode int, body []byte, parsedErr *Error) bool {
+	if statusCode == http.StatusTooManyRequests || (statusCode >= 500 && statusCode <= 599) {
+		return true
+	}
+	if statusCode == http.StatusForbidden {
+		var e Error
+		if parsedErr != nil && len(parsedErr.Error.Errors) > 0 {
+			e = *parsedErr
+		} else if len(body) > 0 {
+			_ = utils.Json.Unmarshal(body, &e)
+		}
+		for _, item := range e.Error.Errors {
+			if isRetryableGoogleReason(item.Reason) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (d *GoogleDrive) request(apiURL string, method string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
@@ -84,7 +234,8 @@ func (d *GoogleDrive) request(apiURL string, method string, callback base.ReqCal
 }
 
 func (d *GoogleDrive) requestWithContext(ctx context.Context, apiURL string, method string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
-	for attempt := 0; attempt < 2; attempt++ {
+	refreshed := false
+	for retryAttempt := 0; ; {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -110,21 +261,28 @@ func (d *GoogleDrive) requestWithContext(ctx context.Context, apiURL string, met
 		if err != nil {
 			return nil, err
 		}
-		if (res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401) && attempt == 0 {
+		if (res.StatusCode() == http.StatusUnauthorized || e.Error.Code == 401) && !refreshed {
+			refreshed = true
 			if err = d.refreshTokenIfNeeded(token); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		if res.StatusCode() < 200 || res.StatusCode() >= 300 {
-			if e.Error.Code != 0 {
-				return nil, fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
-			}
-			return nil, fmt.Errorf("request failed with HTTP %d: %s", res.StatusCode(), res.String())
+		if res.StatusCode() >= 200 && res.StatusCode() < 300 {
+			return res.Body(), nil
 		}
-		return res.Body(), nil
+		if isRetryableGoogleStatus(res.StatusCode(), res.Body(), &e) && retryAttempt < maxGoogleRetries {
+			if sleepErr := retrySleep(ctx, googleBackoffDelay(retryAttempt, res.Header().Get("Retry-After"))); sleepErr != nil {
+				return nil, sleepErr
+			}
+			retryAttempt++
+			continue
+		}
+		if e.Error.Code != 0 {
+			return nil, fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+		}
+		return nil, fmt.Errorf("request failed with HTTP %d: %s", res.StatusCode(), res.String())
 	}
-	return nil, fmt.Errorf("request failed after token refresh retry")
 }
 
 func (d *GoogleDrive) getFiles(ctx context.Context, id string) ([]File, error) {
@@ -309,7 +467,18 @@ func (d *GoogleDrive) waitForCompletion(ctx context.Context, uploadUrl string, t
 			case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
 				continue
 			}
+		case http.StatusTooManyRequests:
+			if sleepErr := retrySleep(ctx, googleBackoffDelay(attempt-1, res.Header.Get("Retry-After"))); sleepErr != nil {
+				return sleepErr
+			}
+			continue
 		default:
+			if status >= 500 && status <= 599 {
+				if sleepErr := retrySleep(ctx, googleBackoffDelay(attempt-1, res.Header.Get("Retry-After"))); sleepErr != nil {
+					return sleepErr
+				}
+				continue
+			}
 			return fmt.Errorf("status query failed with HTTP %d", status)
 		}
 	}
@@ -332,10 +501,150 @@ func (r *chunkAttemptReader) Read(p []byte) (int, error) {
 	return r.rs.Read(p)
 }
 
+func (d *GoogleDrive) uploadSmallFile(ctx context.Context, dstDir model.Obj, file model.FileStreamer, existObj model.Obj, up driver.UpdateProgress) error {
+	limited := driver.NewLimitedUploadStream(ctx, file)
+	content, err := io.ReadAll(io.LimitReader(limited, smallUploadThreshold+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(content)) > smallUploadThreshold {
+		return fmt.Errorf("file size exceeds small upload threshold (%d bytes)", smallUploadThreshold)
+	}
+
+	mimeType := file.GetMimetype()
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	var (
+		method      string
+		apiURL      string
+		contentType string
+		payload     []byte
+	)
+	if existObj != nil {
+		method = http.MethodPatch
+		apiURL = fmt.Sprintf("https://www.googleapis.com/upload/drive/v3/files/%s?uploadType=media&supportsAllDrives=true", url.PathEscape(existObj.GetID()))
+		contentType = mimeType
+		payload = content
+	} else {
+		metaBytes, err := utils.Json.Marshal(base.Json{
+			"name":    file.GetName(),
+			"parents": []string{getReadID(dstDir)},
+		})
+		if err != nil {
+			return err
+		}
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		metaHeader := make(textproto.MIMEHeader)
+		metaHeader.Set("Content-Type", "application/json; charset=UTF-8")
+		metaPart, err := mw.CreatePart(metaHeader)
+		if err != nil {
+			return err
+		}
+		if _, err := metaPart.Write(metaBytes); err != nil {
+			return err
+		}
+		mediaHeader := make(textproto.MIMEHeader)
+		mediaHeader.Set("Content-Type", mimeType)
+		mediaPart, err := mw.CreatePart(mediaHeader)
+		if err != nil {
+			return err
+		}
+		if _, err := mediaPart.Write(content); err != nil {
+			return err
+		}
+		if err := mw.Close(); err != nil {
+			return err
+		}
+		method = http.MethodPost
+		apiURL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true"
+		contentType = fmt.Sprintf("multipart/related; boundary=%s", mw.Boundary())
+		payload = buf.Bytes()
+	}
+
+	refreshed := false
+	for retryAttempt := 0; ; {
+		if utils.IsCanceled(ctx) {
+			return ctx.Err()
+		}
+		var req *http.Request
+		if ctx != nil {
+			req, err = http.NewRequestWithContext(ctx, method, apiURL, bytes.NewReader(payload))
+		} else {
+			req, err = http.NewRequest(method, apiURL, bytes.NewReader(payload))
+		}
+		if err != nil {
+			return err
+		}
+		usedToken := d.getAccessToken()
+		req.ContentLength = int64(len(payload))
+		req.Header.Set("Authorization", "Bearer "+usedToken)
+		req.Header.Set("Content-Type", contentType)
+
+		res, err := base.HttpClient.Do(req)
+		if err != nil {
+			if retryAttempt < maxGoogleRetries {
+				if sleepErr := retrySleep(ctx, googleBackoffDelay(retryAttempt, "")); sleepErr != nil {
+					return sleepErr
+				}
+				retryAttempt++
+				continue
+			}
+			return err
+		}
+
+		body, readErr := io.ReadAll(res.Body)
+		res.Body.Close()
+		if readErr != nil {
+			if retryAttempt < maxGoogleRetries {
+				if sleepErr := retrySleep(ctx, googleBackoffDelay(retryAttempt, "")); sleepErr != nil {
+					return sleepErr
+				}
+				retryAttempt++
+				continue
+			}
+			return readErr
+		}
+
+		if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusCreated {
+			if up != nil {
+				up(100)
+			}
+			d.scheduleFolderSizeRefresh(sizeIndexWriteDebounce)
+			return nil
+		}
+
+		var e Error
+		_ = utils.Json.Unmarshal(body, &e)
+		if (res.StatusCode == http.StatusUnauthorized || e.Error.Code == 401) && !refreshed {
+			refreshed = true
+			if refErr := d.refreshTokenIfNeeded(usedToken); refErr != nil {
+				return refErr
+			}
+			continue
+		}
+
+		if isRetryableGoogleStatus(res.StatusCode, body, &e) && retryAttempt < maxGoogleRetries {
+			if sleepErr := retrySleep(ctx, googleBackoffDelay(retryAttempt, res.Header.Get("Retry-After"))); sleepErr != nil {
+				return sleepErr
+			}
+			retryAttempt++
+			continue
+		}
+
+		if e.Error.Code != 0 {
+			return fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+		}
+		return fmt.Errorf("small upload failed with HTTP %d: %s", res.StatusCode, string(body))
+	}
+}
+
 func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, rawUrl string, up driver.UpdateProgress) error {
 	defaultChunkSize := int64(d.ChunkSize) * 1024 * 1024
 	if defaultChunkSize <= 0 {
-		defaultChunkSize = 10 * 1024 * 1024
+		defaultChunkSize = 16 * 1024 * 1024
 	}
 
 	uploadUrl := cleanUploadUrl(rawUrl)
@@ -445,13 +754,16 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 
 			res, err := base.HttpClient.Do(req)
 			if err != nil {
-				noProgressCount++
-				if noProgressCount >= 5 {
-					freeReader()
-					return fmt.Errorf("upload chunk network error: %w", err)
+				if noProgressCount < maxGoogleRetries {
+					if sleepErr := retrySleep(ctx, googleBackoffDelay(noProgressCount, "")); sleepErr != nil {
+						freeReader()
+						return sleepErr
+					}
+					noProgressCount++
+					continue
 				}
-				time.Sleep(time.Duration(noProgressCount) * 100 * time.Millisecond)
-				continue
+				freeReader()
+				return fmt.Errorf("upload chunk network error: %w", err)
 			}
 
 			bytes, readErr := io.ReadAll(res.Body)
@@ -532,17 +844,26 @@ func (d *GoogleDrive) chunkUpload(ctx context.Context, file model.FileStreamer, 
 
 			default:
 				var e Error
-				if jsonErr := utils.Json.Unmarshal(bytes, &e); jsonErr == nil && e.Error.Code != 0 {
-					if e.Error.Code == 401 {
-						if refErr := d.refreshTokenIfNeeded(usedToken); refErr != nil {
-							freeReader()
-							return refErr
-						}
-						noProgressCount++
-						if noProgressCount < 5 {
-							continue
-						}
+				_ = utils.Json.Unmarshal(bytes, &e)
+				if e.Error.Code == 401 {
+					if refErr := d.refreshTokenIfNeeded(usedToken); refErr != nil {
+						freeReader()
+						return refErr
 					}
+					noProgressCount++
+					if noProgressCount <= maxGoogleRetries {
+						continue
+					}
+				}
+				if isRetryableGoogleStatus(res.StatusCode, bytes, &e) && noProgressCount < maxGoogleRetries {
+					if sleepErr := retrySleep(ctx, googleBackoffDelay(noProgressCount, res.Header.Get("Retry-After"))); sleepErr != nil {
+						freeReader()
+						return sleepErr
+					}
+					noProgressCount++
+					continue
+				}
+				if e.Error.Code != 0 {
 					freeReader()
 					return fmt.Errorf("upload chunk failed (HTTP %d): %s (%v)", res.StatusCode, e.Error.Message, e.Error.Errors)
 				}

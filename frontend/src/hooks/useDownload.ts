@@ -1,9 +1,9 @@
 import { useSelectedLink } from "~/hooks"
 
-const triggerDownload = (url: string) => {
+export const triggerDownload = (url: string, filename = "") => {
   const a = document.createElement("a")
   a.href = url
-  a.download = ""
+  a.download = filename
   a.style.display = "none"
   document.body.appendChild(a)
   a.click()

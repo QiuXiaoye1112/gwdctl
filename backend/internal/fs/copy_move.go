@@ -196,9 +196,21 @@ func transfer(ctx context.Context, taskType taskType, srcObjPath, dstDirPath, ds
 		return nil, errors.WithMessage(err, "failed get dst storage")
 	}
 	sameStorage := srcStorage.GetStorage() == dstStorage.GetStorage()
+	batchID := opts.BatchID
+	if batchID == "" {
+		batchID = uuid.NewString()
+	}
+	batchLabel := opts.BatchLabel
+	if batchLabel == "" {
+		batchLabel = stdpath.Base(srcObjPath)
+	}
 
 	t := &FileTransferTask{
 		TaskData: TaskData{
+			TaskExtension: task.TaskExtension{
+				BatchID:    batchID,
+				BatchLabel: batchLabel,
+			},
 			SrcStorage:    srcStorage,
 			DstStorage:    dstStorage,
 			SrcActualPath: srcObjActualPath,
@@ -327,8 +339,10 @@ func (t *FileTransferTask) RunWithNextTaskCallback(f func(nextTask *FileTransfer
 				Overwrite: t.Overwrite,
 				TaskData: TaskData{
 					TaskExtension: task.TaskExtension{
-						Creator: t.Creator,
-						ApiUrl:  t.ApiUrl,
+						Creator:    t.Creator,
+						ApiUrl:     t.ApiUrl,
+						BatchID:    t.BatchID,
+						BatchLabel: t.BatchLabel,
 					},
 					SrcStorage:    t.SrcStorage,
 					DstStorage:    t.DstStorage,

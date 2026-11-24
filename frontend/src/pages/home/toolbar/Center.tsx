@@ -12,7 +12,6 @@ import {
   userCan,
   getSettingBool,
 } from "~/store"
-import { isArchive } from "~/store/archive"
 import { UserMethods } from "~/types"
 import { CenterIcon } from "./Icon"
 import { bus } from "~/utils"
@@ -55,18 +54,7 @@ export const Center = () => {
     () => !isShare() && objStore.write && userCan("delete"),
   )
 
-  // 5. 解压缩 (decompress): 只有所选对象全部为压缩文件时显示（排除文件夹及非压缩文件）
-  const canDecompress = createMemo(
-    () =>
-      !isShare() &&
-      objStore.write &&
-      userCan("decompress") &&
-      !hasDir() &&
-      selectedObjs().length > 0 &&
-      selectedObjs().every((o) => isArchive(o.name)),
-  )
-
-  // 6. 分享 (share): 任何选中的文件/文件夹均可生成分享
+  // 5. 分享 (share): 任何选中的文件/文件夹均可生成分享
   const canShare = createMemo(() => !isShare() && userCan("share"))
 
   // 7. 下载 (download): 选中有文件可直接下载，或支持打包下载时显示
@@ -131,14 +119,6 @@ export const Center = () => {
                   name="delete"
                   onClick={() => {
                     bus.emit("tool", "delete")
-                  }}
-                />
-              </Show>
-              <Show when={canDecompress()}>
-                <CenterIcon
-                  name="decompress"
-                  onClick={() => {
-                    bus.emit("tool", "decompress")
                   }}
                 />
               </Show>

@@ -12,12 +12,11 @@ import {
   ModalOverlay,
   createDisclosure,
 } from "@hope-ui/solid"
-import { createMemo, createSignal, lazy, onCleanup, Show, Suspense } from "solid-js"
-import { FullLoading } from "~/components"
-import { useDownload, useT } from "~/hooks"
-import { getSettingBool, me, oneChecked, selectedObjs } from "~/store"
+import { createMemo, onCleanup, Show } from "solid-js"
+import { triggerDownload, useDownload, useFetch, useRouter, useT } from "~/hooks"
+import { getSettingBool, me, oneChecked, password, selectedObjs } from "~/store"
 import { UserMethods } from "~/types"
-import { bus } from "~/utils"
+import { api, bus, fsPackageDownload, handleResp } from "~/utils"
 import { CenterIcon } from "./Icon"
 
 export const Download = () => {
@@ -129,19 +128,17 @@ export const DirectDownloadModal = () => {
   )
 }
 
-const PackageDownload = lazy(() => import("./PackageDownload"))
-
 export const PackageDownloadModal = () => {
   const t = useT()
+  const { pathname } = useRouter()
   const { isOpen, onOpen, onClose } = createDisclosure()
-  const [step, setStep] = createSignal<"confirm" | "downloading">("confirm")
+  const [loading, createPackageDownload] = useFetch(fsPackageDownload)
 
   const handler = (name: string) => {
     if (name === "package_download") {
       if (!UserMethods.is_admin(me()) && !getSettingBool("package_download")) {
         return
       }
-      setStep("confirm")
       onOpen()
     }
   }
@@ -167,8 +164,8 @@ export const PackageDownloadModal = () => {
       blockScrollOnMount={false}
       opened={isOpen()}
       onClose={onClose}
-      closeOnOverlayClick={false}
-      closeOnEsc={false}
+      closeOnOverlayClick={!loading()}
+      closeOnEsc={!loading()}
       size={{
         "@initial": "xs",
         "@md": "md",
@@ -177,31 +174,31 @@ export const PackageDownloadModal = () => {
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>{t("home.toolbar.package_download_confirm_title")}</ModalHeader>
-        <Show
-          when={step() === "confirm"}
-          fallback={
-            <Suspense fallback={<FullLoading />}>
-              <PackageDownload onClose={onClose} />
-            </Suspense>
-          }
-        >
-          <ModalBody>
-            <p>{confirmTips()}</p>
-          </ModalBody>
-          <ModalFooter display="flex" gap="$2">
-            <Button onClick={onClose} colorScheme="neutral">
-              {t("global.cancel")}
-            </Button>
-            <Button
-              colorScheme="info"
-              onClick={() => {
-                setStep("downloading")
-              }}
-            >
-              {t("global.confirm")}
-            </Button>
-          </ModalFooter>
-        </Show>
+        <ModalBody>
+          <p>{confirmTips()}</p>
+        </ModalBody>
+        <ModalFooter display="flex" gap="$2">
+          <Button onClick={onClose} colorScheme="neutral" disabled={loading()}>
+            {t("global.cancel")}
+          </Button>
+          <Button
+            colorScheme="info"
+            loading={loading()}
+            onClick={async () => {
+              const resp = await createPackageDownload(
+                pathname(),
+                objs().map((o) => o.name),
+                password(),
+              )
+              handleResp(resp, (data) => {
+                onClose()
+                triggerDownload(`${api}${data.url}`, data.filename)
+              })
+            }}
+          >
+            {t("global.confirm")}
+          </Button>
+        </ModalFooter>
       </ModalContent>
     </Modal>
   )

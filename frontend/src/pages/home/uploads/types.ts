@@ -25,6 +25,9 @@ export interface UploadFileProps {
   name: string
   path: string
   fullPath?: string
+  batchId?: string
+  batchLabel?: string
+  batchTotal?: number
   size: number
   progress: number
   speed: number
@@ -39,13 +42,13 @@ export const StatusBadge = {
   success: "success",
   error: "danger",
 } as const
+export type UploadOverwrite = boolean | "skip"
 export type SetUpload = (key: keyof UploadFileProps, value: any) => void
 export type Upload = (
   uploadPath: string,
   file: File,
   setUpload: SetUpload,
-  asTask: boolean,
-  overwrite: boolean,
+  overwrite: UploadOverwrite,
   rapid: boolean,
   seedOptions?: UploadSeedOptions,
   signal?: AbortSignal,

@@ -81,6 +81,8 @@ func Init(e *gin.Engine) {
 
 	_fs(ownerAuth.Group("/fs"))
 	fsAndShare(api.Group("/fs", middlewares.ShareOrOwner()))
+	api.GET("/fs/package_download/:ticket", downloadLimiter, handles.FsPackageDownloadStream)
+	api.HEAD("/fs/package_download/:ticket", handles.FsPackageDownloadStream)
 	_task(ownerAuth.Group("/task"))
 	_sharing(ownerAuth.Group("/share"))
 	admin(ownerAuth.Group("/admin"))
@@ -111,6 +113,7 @@ func admin(g *gin.RouterGroup) {
 func fsAndShare(g *gin.RouterGroup) {
 	g.Any("/list", handles.FsListSplit)
 	g.Any("/get", handles.FsGetSplit)
+	g.POST("/package_download", handles.FsPackageDownloadCreate)
 	a := g.Group("/archive")
 	a.Any("/meta", handles.FsArchiveMetaSplit)
 	a.Any("/list", handles.FsArchiveListSplit)
@@ -129,7 +132,6 @@ func _fs(g *gin.RouterGroup) {
 	g.POST("/remove_empty_directory", handles.FsRemoveEmptyDirectory)
 	uploadLimiter := middlewares.UploadRateLimiter(stream.ClientUploadLimit)
 	g.PUT("/put", middlewares.FsUp, uploadLimiter, handles.FsStream)
-	g.PUT("/form", middlewares.FsUp, uploadLimiter, handles.FsForm)
 	multipartPkg.DefaultManager.StartGC()
 	multipart := g.Group("/multipart")
 	multipart.POST("/init", middlewares.FsUp, handles.MultipartInit)
@@ -137,7 +139,6 @@ func _fs(g *gin.RouterGroup) {
 	multipart.POST("/complete", handles.MultipartComplete)
 	multipart.GET("/status", handles.MultipartStatus)
 	multipart.POST("/abort", handles.MultipartAbort)
-	g.POST("/archive/decompress", handles.FsArchiveDecompress)
 	g.POST("/get_direct_upload_info", handles.FsGetDirectUploadInfo)
 }
 
