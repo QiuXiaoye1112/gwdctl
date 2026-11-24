@@ -26,6 +26,7 @@ export const ListTitle = (props: {
   orderBy?: OrderBy
   reverse?: boolean
   onSort?: (orderBy: OrderBy) => void
+  hideOnMobile?: boolean
 }) => {
   const t = useT()
 
@@ -65,7 +66,14 @@ export const ListTitle = (props: {
     activeOrderBy() === colName ? getMainColor() : "$neutral11"
 
   return (
-    <HStack class="title" w="$full" p="$2">
+    <HStack
+      class="title"
+      w="$full"
+      p="$2"
+      display={
+        props.hideOnMobile ? { "@initial": "none", "@md": "flex" } : "flex"
+      }
+    >
       <HStack w={cols[0].w} spacing="$1">
         <Show when={!props.disableCheckbox && checkboxOpen()}>
           <ItemCheckbox
@@ -194,6 +202,7 @@ const ListLayout = () => {
         orderBy={dirSort().orderBy}
         reverse={dirSort().reverse}
         onSort={toggleDirSort}
+        hideOnMobile
       />
       <For each={objStore.objs}>
         {(obj, i) => {

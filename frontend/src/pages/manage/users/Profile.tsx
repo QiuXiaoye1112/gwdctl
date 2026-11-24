@@ -1,6 +1,6 @@
 import {
   Button,
-  Checkbox,
+  Divider,
   FormControl,
   FormHelperText,
   FormLabel,
@@ -42,7 +42,6 @@ const Profile = () => {
   useManageTitle("manage.sidemenu.profile")
   const { to } = useRouter()
   const [username, setUsername] = createSignal(me().username)
-  const [changePassword, setChangePassword] = createSignal(false)
   const [password, setPassword] = createSignal("")
   const [confirmPassword, setConfirmPassword] = createSignal("")
   const currentTimeout = getSessionTimeoutMinutes()
@@ -54,9 +53,15 @@ const Profile = () => {
   const [customTimeout, setCustomTimeout] = createSignal(String(currentTimeout))
   const [savingTimeout, setSavingTimeout] = createSignal(false)
 
-  const [loading, save] = useFetch((): PEmptyResp =>
+  const [savingUsername, saveUsernameReq] = useFetch((): PEmptyResp =>
     r.post("/me/update", {
-      username: username(),
+      username: username().trim(),
+      password: "",
+    }),
+  )
+  const [savingPassword, savePasswordReq] = useFetch((): PEmptyResp =>
+    r.post("/me/update", {
+      username: me().username,
       password: password(),
     }),
   )
@@ -64,74 +69,25 @@ const Profile = () => {
     r.post("/auth/2fa/cancel"),
   )
 
-  const timeoutOptions = [
-    {
-      value: "5",
-      label: localStorage.getItem("lang") === "en" ? "5 Minutes" : "5 分钟",
-    },
-    {
-      value: "10",
-      label:
-        localStorage.getItem("lang") === "en"
-          ? "10 Minutes (Default)"
-          : "10 分钟（默认）",
-    },
-    {
-      value: "15",
-      label: localStorage.getItem("lang") === "en" ? "15 Minutes" : "15 分钟",
-    },
-    {
-      value: "30",
-      label: localStorage.getItem("lang") === "en" ? "30 Minutes" : "30 分钟",
-    },
-    {
-      value: "60",
-      label: localStorage.getItem("lang") === "en" ? "1 Hour" : "1 小时",
-    },
-    {
-      value: "120",
-      label: localStorage.getItem("lang") === "en" ? "2 Hours" : "2 小时",
-    },
-    {
-      value: "360",
-      label: localStorage.getItem("lang") === "en" ? "6 Hours" : "6 小时",
-    },
-    {
-      value: "720",
-      label: localStorage.getItem("lang") === "en" ? "12 Hours" : "12 小时",
-    },
-    {
-      value: "1440",
-      label: localStorage.getItem("lang") === "en" ? "24 Hours" : "24 小时",
-    },
-    {
-      value: "0",
-      label:
-        localStorage.getItem("lang") === "en" ? "Never Timeout" : "永不超时",
-    },
-    {
-      value: "custom",
-      label:
-        localStorage.getItem("lang") === "en"
-          ? "Custom Minutes..."
-          : "自定义分钟数...",
-    },
+  const timeoutOptions = () => [
+    { value: "5", label: t("users.timeout_5m") },
+    { value: "10", label: t("users.timeout_10m_default") },
+    { value: "15", label: t("users.timeout_15m") },
+    { value: "30", label: t("users.timeout_30m") },
+    { value: "60", label: t("users.timeout_1h") },
+    { value: "120", label: t("users.timeout_2h") },
+    { value: "360", label: t("users.timeout_6h") },
+    { value: "720", label: t("users.timeout_12h") },
+    { value: "1440", label: t("users.timeout_24h") },
+    { value: "0", label: t("users.timeout_never") },
+    { value: "custom", label: t("users.timeout_custom") },
   ]
 
-  const saveMe = async () => {
-    if (changePassword()) {
-      if (!password()) {
-        notify.warning(
-          localStorage.getItem("lang") === "en"
-            ? "Please enter a new password"
-            : "请输入新密码",
-        )
-        return
-      }
-      if (password() !== confirmPassword()) {
-        notify.warning(t("users.confirm_password_not_same"))
-        return
-      }
+  const saveBasicSettings = async () => {
+    const nextUsername = username().trim()
+    if (!nextUsername) {
+      notify.warning(t("users.username_empty"))
+      return
     }
 
     const opt = sessionTimeoutOption()
@@ -170,11 +126,8 @@ const Profile = () => {
       setSavingTimeout(false)
     }
 
-    const usernameChanged = username() !== me().username
-    const passwordChanged = changePassword() && Boolean(password())
-
-    if (usernameChanged || passwordChanged) {
-      const resp = await save()
+    if (nextUsername !== me().username) {
+      const resp = await saveUsernameReq()
       handleResp(resp, () => {
         changeToken("")
         setMe({} as Me)
@@ -182,12 +135,28 @@ const Profile = () => {
         to(`/@login?redirect=${encodeURIComponent(location.pathname)}`, true)
       })
     } else if (settingSuccess) {
-      notify.success(
-        localStorage.getItem("lang") === "en"
-          ? "Profile and session settings saved"
-          : "个人资料与会话设置已保存",
-      )
+      notify.success(t("users.save_settings_success"))
     }
+  }
+
+  const updatePassword = async () => {
+    if (!password()) {
+      notify.warning(t("users.new_password_empty"))
+      return
+    }
+    if (password() !== confirmPassword()) {
+      notify.warning(t("users.confirm_password_not_same"))
+      return
+    }
+    const resp = await savePasswordReq()
+    handleResp(resp, () => {
+      setPassword("")
+      setConfirmPassword("")
+      changeToken("")
+      setMe({} as Me)
+      notify.success(t("users.update_password_success"))
+      to(`/@login?redirect=${encodeURIComponent(location.pathname)}`, true)
+    })
   }
 
   const disable2FA = async () => {
@@ -199,139 +168,146 @@ const Profile = () => {
   }
 
   return (
-    <VStack w="$full" spacing="$4" alignItems="start">
-      <Heading>{t("users.update_profile")}</Heading>
-      <SimpleGrid gap="$2" columns={{ "@initial": 1, "@md": 2 }} w="$full">
-        <FormControl>
-          <FormLabel for="username">{t("users.change_username")}</FormLabel>
-          <Input
-            id="username"
-            value={username()}
-            onInput={(e) => {
-              setUsername(e.currentTarget.value)
-            }}
-          />
-        </FormControl>
-      </SimpleGrid>
-      <SimpleGrid gap="$2" columns={{ "@initial": 1, "@md": 2 }} w="$full">
-        <FormControl>
-          <FormLabel for="session-timeout">
-            {localStorage.getItem("lang") === "en"
-              ? "Session Retention Time"
-              : "会话保留时间"}
-          </FormLabel>
-          <SelectWrapper
-            w="$full"
-            value={sessionTimeoutOption()}
-            onChange={(val) => {
-              setSessionTimeoutOption(val)
-              if (val !== "custom") {
-                setCustomTimeout(val)
-              }
-            }}
-            options={timeoutOptions}
-          />
-          <FormHelperText>
-            {localStorage.getItem("lang") === "en"
-              ? "Automatically log out after this period of inactivity"
-              : "无操作达到此时间后将自动登出以保护账号安全"}
-          </FormHelperText>
-        </FormControl>
-        <Show when={sessionTimeoutOption() === "custom"}>
-          <FormControl>
-            <FormLabel for="custom-timeout">
-              {localStorage.getItem("lang") === "en"
-                ? "Custom Time (Minutes)"
-                : "自定义时间（分钟）"}
-            </FormLabel>
-            <Input
-              id="custom-timeout"
-              type="number"
-              min={0}
-              value={customTimeout()}
-              onInput={(e) => setCustomTimeout(e.currentTarget.value)}
-              placeholder={
-                localStorage.getItem("lang") === "en" ? "e.g. 15" : "例如 15"
-              }
-            />
-            <FormHelperText>
-              {localStorage.getItem("lang") === "en"
-                ? "Enter timeout duration in minutes"
-                : "请输入超时分钟数"}
-            </FormHelperText>
-          </FormControl>
-        </Show>
-      </SimpleGrid>
-      <Checkbox
-        checked={changePassword()}
-        onChange={() => {
-          setChangePassword(!changePassword())
-          setPassword("")
-          setConfirmPassword("")
+    <VStack w="$full" spacing="$6" alignItems="start">
+      <VStack
+        as="form"
+        autocomplete="off"
+        onSubmit={(e: Event) => {
+          e.preventDefault()
+          saveBasicSettings()
         }}
+        w="$full"
+        spacing="$4"
+        alignItems="start"
       >
-        {localStorage.getItem("lang") === "en" ? "Change Password" : "更改密码"}
-      </Checkbox>
-      <Show when={changePassword()}>
-        <SimpleGrid gap="$2" columns={{ "@initial": 1, "@md": 2 }} w="$full">
+        <Heading>{t("users.basic_and_session")}</Heading>
+        <SimpleGrid gap="$3" columns={{ "@initial": 1, "@md": 2 }} w="$full">
           <FormControl>
-            <FormLabel for="password">{t("users.change_password")}</FormLabel>
+            <FormLabel for="username">{t("users.username")}</FormLabel>
             <Input
-              id="password"
+              id="username"
+              autocomplete="off"
+              value={username()}
+              onInput={(e) => {
+                setUsername(e.currentTarget.value)
+              }}
+            />
+          </FormControl>
+          <FormControl>
+            <FormLabel for="session-timeout">
+              {t("users.session_timeout")}
+            </FormLabel>
+            <SelectWrapper
+              w="$full"
+              value={sessionTimeoutOption()}
+              onChange={(val) => {
+                setSessionTimeoutOption(val)
+                if (val !== "custom") {
+                  setCustomTimeout(val)
+                }
+              }}
+              options={timeoutOptions()}
+            />
+            <FormHelperText>{t("users.session_timeout_tips")}</FormHelperText>
+          </FormControl>
+          <Show when={sessionTimeoutOption() === "custom"}>
+            <FormControl>
+              <FormLabel for="custom-timeout">
+                {t("users.custom_timeout")}
+              </FormLabel>
+              <Input
+                id="custom-timeout"
+                type="number"
+                min={0}
+                value={customTimeout()}
+                onInput={(e) => setCustomTimeout(e.currentTarget.value)}
+                placeholder={t("users.custom_timeout_placeholder")}
+              />
+              <FormHelperText>{t("users.custom_timeout_tips")}</FormHelperText>
+            </FormControl>
+          </Show>
+        </SimpleGrid>
+        <Button
+          type="submit"
+          loading={savingUsername() || savingTimeout()}
+        >
+          {t("users.save_settings")}
+        </Button>
+      </VStack>
+
+      <Divider />
+
+      <VStack
+        as="form"
+        autocomplete="off"
+        onSubmit={(e: Event) => {
+          e.preventDefault()
+          updatePassword()
+        }}
+        w="$full"
+        spacing="$4"
+        alignItems="start"
+      >
+        <Heading>{t("users.password_and_security")}</Heading>
+        <SimpleGrid gap="$3" columns={{ "@initial": 1, "@md": 2 }} w="$full">
+          <FormControl>
+            <FormLabel for="new-password">{t("users.new_password")}</FormLabel>
+            <Input
+              id="new-password"
               type="password"
               autocomplete="new-password"
-              placeholder="********"
+              placeholder={t("users.new_password_placeholder")}
               value={password()}
               onInput={(e) => {
                 setPassword(e.currentTarget.value)
               }}
             />
-            <FormHelperText>{t("users.change_password-tips")}</FormHelperText>
           </FormControl>
           <FormControl>
-            <FormLabel for="confirm-password">
-              {t("users.confirm_password")}
+            <FormLabel for="confirm-new-password">
+              {t("users.confirm_new_password")}
             </FormLabel>
             <Input
-              id="confirm-password"
+              id="confirm-new-password"
               type="password"
               autocomplete="new-password"
-              placeholder="********"
+              placeholder={t("users.confirm_new_password_placeholder")}
               value={confirmPassword()}
               onInput={(e) => {
                 setConfirmPassword(e.currentTarget.value)
               }}
             />
-            <FormHelperText>{t("users.confirm_password-tips")}</FormHelperText>
           </FormControl>
         </SimpleGrid>
-      </Show>
-      <HStack spacing="$2">
-        <Button loading={loading() || savingTimeout()} onClick={saveMe}>
-          {t("global.save")}
-        </Button>
-        <Show
-          when={!me().otp}
-          fallback={
-            <Button
-              colorScheme="danger"
-              loading={cancel2faLoading()}
-              onClick={disable2FA}
-            >
-              {t("users.cancel_2fa")}
-            </Button>
-          }
-        >
-          <Button
-            colorScheme="accent"
-            onClick={() => {
-              to("/@manage/2fa")
-            }}
-          >
-            {t("users.enable_2fa")}
+        <HStack spacing="$2">
+          <Button type="submit" loading={savingPassword()}>
+            {t("users.update_password")}
           </Button>
-        </Show>
-      </HStack>
+          <Show
+            when={!me().otp}
+            fallback={
+              <Button
+                type="button"
+                colorScheme="danger"
+                loading={cancel2faLoading()}
+                onClick={disable2FA}
+              >
+                {t("users.cancel_2fa")}
+              </Button>
+            }
+          >
+            <Button
+              type="button"
+              colorScheme="accent"
+              onClick={() => {
+                to("/@manage/2fa")
+              }}
+            >
+              {t("users.enable_2fa")}
+            </Button>
+          </Show>
+        </HStack>
+      </VStack>
     </VStack>
   )
 }
