@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"image/png"
+	"strings"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
@@ -15,7 +16,7 @@ import (
 )
 
 type LoginReq struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username"`
 	Password string `json:"password"`
 	OtpCode  string `json:"otp_code"`
 }
@@ -24,7 +25,15 @@ type LoginReq struct {
 func LoginHash(c *gin.Context) {
 	var req LoginReq
 	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+		common.ErrorStrResp(c, "invalid request payload", 400)
+		return
+	}
+	if strings.TrimSpace(req.Username) == "" {
+		common.ErrorStrResp(c, "please enter your username", 400)
+		return
+	}
+	if req.Password == "" {
+		common.ErrorStrResp(c, "please enter your password", 400)
 		return
 	}
 	loginHash(c, &req)
@@ -102,14 +111,18 @@ func CurrentUser(c *gin.Context) {
 }
 
 type UpdateCurrentReq struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
 func UpdateCurrent(c *gin.Context) {
 	var req UpdateCurrentReq
 	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+		common.ErrorStrResp(c, "invalid request payload", 400)
+		return
+	}
+	if strings.TrimSpace(req.Username) == "" {
+		common.ErrorStrResp(c, "username is required", 400)
 		return
 	}
 	user := c.Request.Context().Value(conf.UserKey).(*model.User)
@@ -173,14 +186,18 @@ func Generate2FA(c *gin.Context) {
 }
 
 type Verify2FAReq struct {
-	Code   string `json:"code" binding:"required"`
-	Secret string `json:"secret" binding:"required"`
+	Code   string `json:"code"`
+	Secret string `json:"secret"`
 }
 
 func Verify2FA(c *gin.Context) {
 	var req Verify2FAReq
 	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+		common.ErrorStrResp(c, "invalid request payload", 400)
+		return
+	}
+	if strings.TrimSpace(req.Code) == "" || strings.TrimSpace(req.Secret) == "" {
+		common.ErrorStrResp(c, model.Invalid2FACode, 400)
 		return
 	}
 	user := c.Request.Context().Value(conf.UserKey).(*model.User)

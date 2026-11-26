@@ -91,3 +91,59 @@ func TestLoginHash2FAChallengeDoesNotConsumeRetryQuota(t *testing.T) {
 		t.Fatalf("expected 1 failed attempt after wrong OTP, got ok=%v count=%d", ok, count)
 	}
 }
+
+func TestLoginHashMissingFieldsReturnsFriendlyMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name    string
+		body    string
+		wantMsg string
+	}{
+		{
+			name:    "empty username",
+			body:    `{"username":"","password":"abc"}`,
+			wantMsg: "please enter your username",
+		},
+		{
+			name:    "whitespace username",
+			body:    `{"username":"   ","password":"abc"}`,
+			wantMsg: "please enter your username",
+		},
+		{
+			name:    "empty password",
+			body:    `{"username":"admin","password":""}`,
+			wantMsg: "please enter your password",
+		},
+		{
+			name:    "malformed json",
+			body:    `{bad`,
+			wantMsg: "invalid request payload",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/login/hash", bytes.NewBufferString(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			c.Request = req
+			LoginHash(c)
+
+			var resp struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal response failed: %v (body=%s)", err, w.Body.String())
+			}
+			if resp.Code != 400 {
+				t.Fatalf("expected code 400, got %d", resp.Code)
+			}
+			if resp.Message != tc.wantMsg {
+				t.Fatalf("expected message %q, got %q", tc.wantMsg, resp.Message)
+			}
+		})
+	}
+}

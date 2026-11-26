@@ -5,6 +5,7 @@ import {
   Heading,
   Input,
   Button,
+  Text,
   useColorModeValue,
   HStack,
   VStack,
@@ -37,6 +38,12 @@ const Login = () => {
   const [password, setPassword] = createSignal("")
   const [opt, setOpt] = createSignal("")
   const [needOpt, setNeedOpt] = createSignal(false)
+  const [fieldError, setFieldError] = createSignal<{
+    field: "username" | "password" | "otp"
+    msg: string
+  } | null>(null)
+  let usernameInputRef: HTMLInputElement | undefined
+  let passwordInputRef: HTMLInputElement | undefined
   let totpInputRef: HTMLInputElement | undefined
 
   // Purge any legacy plaintext credentials previously saved in localStorage;
@@ -69,6 +76,24 @@ const Login = () => {
   const Login = async () => {
     if (loading()) return
 
+    if (!needOpt()) {
+      if (!username().trim()) {
+        setFieldError({ field: "username", msg: t("login.username_required") })
+        usernameInputRef?.focus()
+        return
+      }
+      if (!password()) {
+        setFieldError({ field: "password", msg: t("login.password_required") })
+        passwordInputRef?.focus()
+        return
+      }
+    } else if (!opt().trim()) {
+      setFieldError({ field: "otp", msg: t("login.otp_required") })
+      totpInputRef?.focus()
+      return
+    }
+    setFieldError(null)
+
     const resp = await data()
     handleRespWithoutAuthAndNotify(
       resp,
@@ -83,6 +108,7 @@ const Login = () => {
       (msg, code) => {
         if (!needOpt() && code === 402) {
           setOpt("")
+          setFieldError(null)
           setNeedOpt(true)
         } else {
           notify.error(msg)
@@ -127,11 +153,13 @@ const Login = () => {
               autocomplete="one-time-code"
               inputMode="numeric"
               ref={totpInputRef}
+              invalid={fieldError()?.field === "otp"}
               placeholder={t("login.otp-tips")}
               value={opt()}
               onInput={(e) => {
                 const code = e.currentTarget.value
                 setOpt(code)
+                if (fieldError()?.field === "otp") setFieldError(null)
                 if (/^\d{6}$/.test(code)) {
                   void Login()
                 }
@@ -142,18 +170,35 @@ const Login = () => {
           <Input
             name="username"
             autocomplete="username"
+            ref={usernameInputRef}
+            invalid={fieldError()?.field === "username"}
             placeholder={t("login.username-tips")}
             value={username()}
-            onInput={(e) => setUsername(e.currentTarget.value)}
+            onInput={(e) => {
+              setUsername(e.currentTarget.value)
+              if (fieldError()?.field === "username") setFieldError(null)
+            }}
           />
           <Input
             name="password"
             autocomplete="current-password"
+            ref={passwordInputRef}
+            invalid={fieldError()?.field === "password"}
             placeholder={t("login.password-tips")}
             type="password"
             value={password()}
-            onInput={(e) => setPassword(e.currentTarget.value)}
+            onInput={(e) => {
+              setPassword(e.currentTarget.value)
+              if (fieldError()?.field === "password") setFieldError(null)
+            }}
           />
+        </Show>
+        <Show when={fieldError()}>
+          {(err) => (
+            <Text w="$full" fontSize="$xs" color="$danger10" mt="-$2">
+              {err().msg}
+            </Text>
+          )}
         </Show>
         <HStack w="$full" spacing="$2">
           <Button
@@ -161,6 +206,7 @@ const Login = () => {
             colorScheme="primary"
             w="$full"
             onClick={() => {
+              setFieldError(null)
               if (needOpt()) {
                 setOpt("")
                 setNeedOpt(false)
