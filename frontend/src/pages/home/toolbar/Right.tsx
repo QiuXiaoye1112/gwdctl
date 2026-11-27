@@ -122,11 +122,13 @@ export const Right = () => {
                 }}
               />
             </Show>
-            <RightIcon
-              tips="toggle_checkbox"
-              as={TbCheckbox}
-              onClick={toggleCheckbox}
-            />
+            <Show when={isFolder() || objStore.state === State.FetchingMore}>
+              <RightIcon
+                tips="toggle_checkbox"
+                as={TbCheckbox}
+                onClick={toggleCheckbox}
+              />
+            </Show>
             <RightIcon
               as={AiOutlineSetting}
               tips="local_settings"
