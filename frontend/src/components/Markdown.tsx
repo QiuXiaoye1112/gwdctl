@@ -1,5 +1,4 @@
-import { Anchor, Box, List, ListItem, useColorModeValue } from "@hope-ui/solid"
-import { createStorageSignal } from "@solid-primitives/storage"
+import { Box, useColorModeValue } from "@hope-ui/solid"
 import { clsx } from "clsx"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
@@ -7,12 +6,10 @@ import rehypeStringify from "rehype-stringify"
 import remarkGfm from "remark-gfm"
 import remarkParse from "remark-parse"
 import remarkRehype from "remark-rehype"
-import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js"
-import { Motion } from "solid-motionone"
+import { Show, createEffect, createMemo, createSignal, on } from "solid-js"
 import { unified } from "unified"
 import { useCDN, useParseText, useRouter } from "~/hooks"
-import { useScrollListener } from "~/pages/home/toolbar/BackTop.jsx"
-import { getMainColor, getSettingBool, me } from "~/store"
+import { getSettingBool, me } from "~/store"
 import {
   api,
   loadCSS,
@@ -22,136 +19,12 @@ import {
   pathJoin,
   pathResolve,
 } from "~/utils"
-import { isMobile } from "~/utils/compatibility.js"
 import hljs from "highlight.js"
 import { EncodingSelect } from "."
 import "./markdown.css"
 
-type TocItem = { indent: number; text: string; tagName: string; key: string }
-
 const MERMAID_PATTERN = /```mermaid[\s\S]*?```/i
 const MATH_PATTERN = /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/
-
-const [isTocVisible, setVisible] = createSignal(false)
-const [isTocDisabled, setTocDisabled] = createStorageSignal(
-  "isMarkdownTocDisabled",
-  true,
-  {
-    serializer: (v: boolean) => JSON.stringify(v),
-    deserializer: (v) => JSON.parse(v),
-  },
-)
-
-export { isTocVisible, setTocDisabled }
-
-function MarkdownToc(props: {
-  disabled?: boolean
-  markdownRef: HTMLDivElement
-}) {
-  if (props.disabled || isMobile) return null
-
-  const [tocList, setTocList] = createSignal<TocItem[]>([])
-
-  useScrollListener(
-    () => setVisible(window.scrollY > 100 && tocList().length > 1),
-    { immediate: true },
-  )
-
-  createEffect(() => {
-    const $markdown = props.markdownRef.querySelector(".markdown-body")
-    if (!$markdown) return
-
-    const iterator = document.createNodeIterator(
-      $markdown,
-      NodeFilter.SHOW_ELEMENT,
-      {
-        acceptNode: (node) =>
-          /h[1-3]/i.test(node.nodeName)
-            ? NodeFilter.FILTER_ACCEPT
-            : NodeFilter.FILTER_REJECT,
-      },
-    )
-
-    const items: TocItem[] = []
-    let $next = iterator.nextNode()
-    let minLevel = 6
-
-    while ($next) {
-      const level = Number($next.nodeName.match(/h(\d)/i)![1])
-      if (level < minLevel) minLevel = level
-      items.push({
-        indent: level,
-        text: $next.textContent!,
-        tagName: $next.nodeName.toLowerCase(),
-        key: ($next as Element).getAttribute("key")!,
-      })
-      $next = iterator.nextNode()
-    }
-
-    setTocList(
-      items.map((item) => ({ ...item, indent: item.indent - minLevel })),
-    )
-  })
-
-  const handleAnchor = (item: TocItem) => {
-    const $target = props.markdownRef.querySelector(
-      `${item.tagName}[key=${item.key}]`,
-    )
-    if (!$target) return
-
-    const navBottom = Math.max(
-      document.querySelector(".nav")?.getBoundingClientRect().bottom ?? 0,
-      0,
-    )
-    window.scrollBy({
-      behavior: "smooth",
-      top: $target.getBoundingClientRect().y - navBottom,
-    })
-  }
-
-  const initialOffsetX = "calc(100% - 20px)"
-  const [offsetX, setOffsetX] = createSignal<number | string>(initialOffsetX)
-
-  return (
-    <Show when={!isTocDisabled() && isTocVisible()}>
-      <Box
-        as={Motion.div}
-        initial={{ x: 999 }}
-        animate={{ x: offsetX() }}
-        onMouseEnter={() => setOffsetX(0)}
-        onMouseLeave={() => setOffsetX(initialOffsetX)}
-        zIndex="$overlay"
-        pos="fixed"
-        right="$6"
-        top="$6"
-      >
-        <Box
-          mt="$5"
-          p="$2"
-          shadow="$outline"
-          rounded="$lg"
-          bgColor="white"
-          _dark={{ bgColor: "$neutral3" }}
-        >
-          <List maxH="60vh" overflowY="auto">
-            <For each={tocList()}>
-              {(item) => (
-                <ListItem pl={15 * item.indent} m={4}>
-                  <Anchor
-                    color={getMainColor()}
-                    onClick={() => handleAnchor(item)}
-                  >
-                    {item.text}
-                  </Anchor>
-                </ListItem>
-              )}
-            </For>
-          </List>
-        </Box>
-      </Box>
-    </Show>
-  )
-}
 
 const { katexCSSPath, mermaidJSPath } = useCDN()
 
@@ -210,7 +83,6 @@ export function Markdown(props: {
   class?: string
   ext?: string
   readme?: boolean
-  toc?: boolean
   sanitize?: boolean
 }) {
   const [encoding, setEncoding] = createSignal<string>("utf-8")
@@ -319,7 +191,6 @@ export function Markdown(props: {
           referenceText={props.children}
         />
       </Show>
-      <MarkdownToc disabled={!props.toc} markdownRef={markdownRef()!} />
     </Box>
   )
 }

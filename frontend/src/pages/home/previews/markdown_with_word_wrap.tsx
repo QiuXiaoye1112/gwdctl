@@ -11,7 +11,6 @@ const MdPreview = () => {
         class="word-wrap"
         children={content()?.content}
         ext={ext(objStore.obj.name)}
-        toc
       />
     </MaybeLoading>
   )

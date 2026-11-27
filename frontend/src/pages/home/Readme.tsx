@@ -57,11 +57,7 @@ export function Readme(props: {
     <Show when={getSettingBool("readme_autorender") && readme()}>
       <Box w="$full" rounded="$xl" p="$4" bgColor={cardBg()} shadow="$lg">
         <MaybeLoading loading={content.loading}>
-          <Markdown
-            children={content()?.content}
-            readme
-            toc={props.fromMeta === "readme"}
-          />
+          <Markdown children={content()?.content} readme />
         </MaybeLoading>
       </Box>
     </Show>

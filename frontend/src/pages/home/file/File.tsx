@@ -4,25 +4,48 @@ import { Dynamic } from "solid-js/web"
 import { Error, FullLoading, SelectWrapper } from "~/components"
 import { objStore } from "~/store"
 import { useRouter } from "~/hooks"
+import { ext } from "~/utils"
 import { Download } from "../previews/download"
 import { OpenWith } from "./open-with"
 import { getPreviews } from "../previews"
 
 const File = () => {
   const { searchParams, setSearchParams } = useRouter()
-  const previews = getPreviews({ ...objStore.obj, provider: objStore.provider })
+  const defaultPreviews = createMemo(() =>
+    getPreviews({ ...objStore.obj, provider: objStore.provider }),
+  )
+  const previews = createMemo(() => {
+    const original = defaultPreviews()
+    if (ext(objStore.obj.name).toLowerCase() !== "md") return original
+    const markdown = original.find((item) => item.key === "markdown")
+    if (!markdown) return original
+    return [
+      markdown,
+      ...original.filter(
+        (item) =>
+          !["markdown", "markdown_with_word_wrap", "download"].includes(
+            item.key,
+          ),
+      ),
+      ...original.filter((item) => item.key === "download"),
+    ]
+  })
   const cur = createMemo(() => {
-    if (!previews.length) return undefined
+    const options = previews()
+    if (!options.length) return undefined
     const selected = searchParams["preview"]
     if (selected) {
-      const found = previews.find((item) => item.key === selected)
+      const found = options.find((item) => item.key === selected)
       if (found) return found
     }
-    return previews[0]
+    return (
+      options.find((item) => item.key === defaultPreviews()[0]?.key) ??
+      options[0]
+    )
   })
 
   return (
-    <Show when={previews.length > 1} fallback={<Download openWith />}>
+    <Show when={previews().length > 1} fallback={<Download openWith />}>
       <VStack w="$full" spacing="$2">
         <HStack w="$full" spacing="$2">
           <SelectWrapper
@@ -31,7 +54,7 @@ const File = () => {
             onChange={(key) => {
               setSearchParams({ preview: key }, { replace: true })
             }}
-            options={previews.map((item) => ({
+            options={previews().map((item) => ({
               value: item.key,
               label: item.name,
             }))}

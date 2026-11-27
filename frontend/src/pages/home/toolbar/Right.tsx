@@ -3,15 +3,20 @@ import { createMemo, Show } from "solid-js"
 import { RightIcon } from "./Icon"
 import { CgMoreO } from "solid-icons/cg"
 import { TbCheckbox } from "solid-icons/tb"
-import { objStore, selectAll, State, toggleCheckbox, userCan, me } from "~/store"
+import {
+  objStore,
+  selectAll,
+  State,
+  toggleCheckbox,
+  userCan,
+  me,
+} from "~/store"
 import { bus } from "~/utils"
 import { operations } from "./operations"
 import { AiOutlineCloudUpload, AiOutlineSetting } from "solid-icons/ai"
 import { RiSystemRefreshLine } from "solid-icons/ri"
 import { usePath, useRouter } from "~/hooks"
 import { Motion } from "solid-motionone"
-import { isTocVisible, setTocDisabled } from "~/components"
-import { BiSolidBookContent } from "solid-icons/bi"
 import { UserMethods } from "~/types"
 
 export const Right = () => {
@@ -110,15 +115,6 @@ export const Right = () => {
                 tips="upload"
                 onClick={() => {
                   bus.emit("tool", "upload")
-                }}
-              />
-            </Show>
-            <Show when={isTocVisible()}>
-              <RightIcon
-                as={BiSolidBookContent}
-                tips="toggle_markdown_toc"
-                onClick={() => {
-                  setTocDisabled((disabled) => !disabled)
                 }}
               />
             </Show>

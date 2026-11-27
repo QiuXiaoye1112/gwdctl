@@ -7,7 +7,8 @@ import { Rename } from "./Rename"
 import { Mkdir } from "./Mkdir"
 import { RemoveEmptyDirectory } from "./RemoveEmptyDirectory"
 import { DirectDownloadModal, PackageDownloadModal } from "./Download"
-import { lazy } from "solid-js"
+import { lazy, Show } from "solid-js"
+import { objStore, State } from "~/store"
 import { ModalWrapper } from "./ModalWrapper"
 import { LocalSettings } from "./LocalSettings"
 import { TasksDrawer } from "./TasksDrawer"
@@ -42,7 +43,9 @@ export const Modal = () => {
 export const Toolbar = () => {
   return (
     <Portal>
-      <Right />
+      <Show when={[State.Folder, State.FetchingMore].includes(objStore.state)}>
+        <Right />
+      </Show>
       <Center />
       <Modal />
       <BackTop />
