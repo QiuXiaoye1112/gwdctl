@@ -28,6 +28,8 @@
   "preview": {
     "download": "Download",
     "failed_load_img": "Failed to load image",
+    "failed_load_excel": "Could not read the spreadsheet. You can still download it.",
+    "markdown_outline_empty": "There are no headings in this document.",
     "open_with": "Open with ...",
     "play_with": "Play with ...",
     "install": "Install",
@@ -50,6 +52,7 @@
       "markdown": "Markdown Render",
       "flash": "Flash Player",
       "markdown_with_word_wrap": "Markdown Render (with word wrap)",
+      "markdown_outline": "Outline",
       "url_open": "URL Open",
 
       "image": "Image Viewer",

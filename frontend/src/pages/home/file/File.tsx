@@ -21,11 +21,16 @@ const File = () => {
     if (!markdown) return original
     return [
       markdown,
+      ...original.filter((item) => item.key === "markdown_with_word_wrap"),
+      ...original.filter((item) => item.key === "markdown_outline"),
       ...original.filter(
         (item) =>
-          !["markdown", "markdown_with_word_wrap", "download"].includes(
-            item.key,
-          ),
+          ![
+            "markdown",
+            "markdown_with_word_wrap",
+            "markdown_outline",
+            "download",
+          ].includes(item.key),
       ),
       ...original.filter((item) => item.key === "download"),
     ]

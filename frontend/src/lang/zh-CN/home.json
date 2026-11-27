@@ -28,6 +28,8 @@
   "preview": {
     "download": "下载",
     "failed_load_img": "图像加载失败",
+    "failed_load_excel": "无法读取表格内容，你仍可下载原文件。",
+    "markdown_outline_empty": "这份文档没有标题。",
     "open_with": "用...打开",
     "play_with": "用...播放",
     "install": "安装",
@@ -50,6 +52,7 @@
       "markdown": "Markdown 渲染器",
       "flash": "Flash 播放器",
       "markdown_with_word_wrap": "Markdown 渲染器（带换行）",
+      "markdown_outline": "大纲",
       "url_open": "打开网址",
 
       "image": "图像查看器",

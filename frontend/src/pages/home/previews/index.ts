@@ -77,6 +77,14 @@ const previews: Preview[] = [
     prior: true,
   },
   {
+    key: "markdown_outline",
+    exts: ["md"],
+    component: lazy(() =>
+      import("./markdown").then((m) => ({ default: m.MdOutlinePreview })),
+    ),
+    prior: false,
+  },
+  {
     key: "url_open",
     exts: ["url"],
     component: lazy(() => import("./url")),

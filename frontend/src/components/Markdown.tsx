@@ -22,6 +22,7 @@ import {
 import hljs from "highlight.js"
 import { EncodingSelect } from "."
 import "./markdown.css"
+import { MarkdownOutline } from "./MarkdownOutline"
 
 const MERMAID_PATTERN = /```mermaid[\s\S]*?```/i
 const MATH_PATTERN = /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/
@@ -84,6 +85,7 @@ export function Markdown(props: {
   ext?: string
   readme?: boolean
   sanitize?: boolean
+  outline?: { label: string; emptyLabel: string }
 }) {
   const [encoding, setEncoding] = createSignal<string>("utf-8")
   const [show, setShow] = createSignal(true)
@@ -171,6 +173,8 @@ export function Markdown(props: {
 
   const [markdownRef, setMarkdownRef] = createSignal<HTMLDivElement>()
 
+  const [bodyRef, setBodyRef] = createSignal<HTMLElement>()
+
   return (
     <Box
       ref={(r: HTMLDivElement) => setMarkdownRef(r)}
@@ -179,7 +183,18 @@ export function Markdown(props: {
       w="$full"
     >
       <Show when={show()}>
+        <Show when={props.outline}>
+          {(outline) => (
+            <MarkdownOutline
+              article={bodyRef}
+              revision={markdownHTML()}
+              label={outline().label}
+              emptyLabel={outline().emptyLabel}
+            />
+          )}
+        </Show>
         <Box
+          ref={(el: HTMLElement) => setBodyRef(el)}
           class={clsx("markdown-body", props.class)}
           innerHTML={markdownHTML()}
         />

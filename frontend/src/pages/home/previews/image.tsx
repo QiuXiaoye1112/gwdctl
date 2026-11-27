@@ -42,8 +42,8 @@ import { objStore } from "~/store"
 import { Obj, ObjType } from "~/types"
 import { ext, formatDate, getFileSize, loadScriptIIFE } from "~/utils"
 
-const HEIF_EXTS = new Set(["heic", "heif", "avif", "vvc", "avc"])
-const isHeif = (name: string) => HEIF_EXTS.has(ext(name).toLowerCase())
+const LIBHEIF_EXTS = new Set(["heic", "heif", "vvc", "avc"])
+const usesLibHeif = (name: string) => LIBHEIF_EXTS.has(ext(name).toLowerCase())
 const ZOOM_MIN = 0.1
 const ZOOM_MAX = 10
 const ZOOM_WHEEL_FACTOR = 1.08
@@ -92,17 +92,19 @@ const HeifView = (props: {
       const img = images[0]
       const w = img.get_width()
       const h = img.get_height()
-      if (!canvas) return
+      if (!canvas) throw new Error("Image canvas unavailable")
       canvas.width = w
       canvas.height = h
       const imageData = new ImageData(w, h)
-      await new Promise<void>((resolve) => {
+      const context = canvas.getContext("2d")
+      if (!context) throw new Error("Image canvas unavailable")
+      const pixels = await new Promise<ImageData>((resolve, reject) => {
         img.display(imageData, (data: ImageData | null) => {
-          if (!data || !canvas) return resolve()
-          canvas.getContext("2d")?.putImageData(data, 0, 0)
-          resolve()
+          if (data) resolve(data)
+          else reject(new Error("No decoded image pixels"))
         })
       })
+      context.putImageData(pixels, 0, 0)
       props.onLoad?.(w, h)
       setLoading(false)
     } catch (e) {
@@ -165,7 +167,12 @@ const Preview = (props: PreviewProps) => {
 
   let images =
     props.images ||
-    objStore.objs.filter((o) => o.type === ObjType.IMAGE || isHeif(o.name))
+    objStore.objs.filter(
+      (o) =>
+        o.type === ObjType.IMAGE ||
+        usesLibHeif(o.name) ||
+        ext(o.name).toLowerCase() === "avif",
+    )
   if (images.length === 0) images = [objStore.obj]
 
   const curIdx = () => images.findIndex((f) => f.name === objStore.obj.name)
@@ -511,7 +518,7 @@ const Preview = (props: PreviewProps) => {
                 />
               }
             >
-              <Match when={isHeif(objStore.obj.name)}>
+              <Match when={usesLibHeif(objStore.obj.name)}>
                 <HeifView
                   src={objStore.raw_url}
                   onLoad={onHeifLoad}

@@ -3,6 +3,7 @@ import { Box, Button, HStack } from "@hope-ui/solid"
 import { loadScriptIIFE } from "~/utils"
 import { createSignal, onMount, For, Show } from "solid-js"
 import { useLink, useT, useCDN } from "~/hooks"
+import { normalizeWorksheetTargets } from "./xlsx_relationships"
 
 // 声明全局ExcelJS类型
 declare global {
@@ -59,7 +60,10 @@ const ExcelViewerApp = () => {
 
       // 使用ExcelJS解析文件
       const workbook = new window.ExcelJS.Workbook()
-      await workbook.xlsx.load(arrayBuffer)
+      await workbook.xlsx.load(await normalizeWorksheetTargets(arrayBuffer))
+      if (workbook.worksheets.length === 0) {
+        throw new Error("No readable worksheets")
+      }
 
       // 提取所有工作表数据
       const sheetsData: SheetData[] = []
@@ -229,7 +233,7 @@ const ExcelViewerApp = () => {
 
           {/* 错误状态 */}
           <Show when={error()}>
-            <Erro msg={t("preview.failed_load_excel")} h="70vh" />
+            <Erro msg={t("home.preview.failed_load_excel")} h="70vh" />
           </Show>
         </div>
       </Box>
