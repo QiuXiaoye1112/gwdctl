@@ -49,7 +49,7 @@ rollback() {
 trap rollback EXIT
 
 info "正在下载 Google Drive 服务端程序..."
-BIN_URL="https://github.com/${REPO}/releases/download/v1.0.9/gwd-linux-amd64.gz"
+BIN_URL="https://github.com/${REPO}/releases/download/v1.0.10/gwd-linux-amd64.gz"
 
 curl -fL --retry 3 --connect-timeout 15 "$BIN_URL" -o "${tmp_dir}/gwd.gz" || die "下载服务端程序失败。"
 
@@ -58,7 +58,7 @@ gzip -dc "${tmp_dir}/gwd.gz" > "${tmp_dir}/gwd"
 chmod 755 "${tmp_dir}/gwd"
 
 info "正在下载 gwdctl 终端管理工具..."
-CTL_URL="https://raw.githubusercontent.com/${REPO}/v1.0.9/gwdctl.py"
+CTL_URL="https://raw.githubusercontent.com/${REPO}/v1.0.10/gwdctl.py"
 curl -fsSL --retry 3 --connect-timeout 15 "$CTL_URL" -o "${tmp_dir}/gwdctl.py" || die "下载 gwdctl 失败。"
 python3 -m py_compile "${tmp_dir}/gwdctl.py" >/dev/null 2>&1 || die "下载的 gwdctl.py 脚本语法错误。"
 chmod 755 "${tmp_dir}/gwdctl.py"
