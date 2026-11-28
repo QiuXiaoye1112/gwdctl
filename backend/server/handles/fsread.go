@@ -21,9 +21,10 @@ import (
 
 type ListReq struct {
 	model.PageReq
-	Path     string `json:"path" form:"path"`
-	Password string `json:"password" form:"password"`
-	Refresh  bool   `json:"refresh"`
+	Path         string `json:"path" form:"path"`
+	Password     string `json:"password" form:"password"`
+	Refresh      bool   `json:"refresh"`
+	RefreshSizes bool   `json:"refresh_sizes"`
 }
 
 type DirReq struct {
@@ -120,6 +121,15 @@ func FsList(c *gin.Context, req *ListReq, user *model.User) {
 	if err != nil {
 		common.ErrorResp(c, err, 500)
 		return
+	}
+	// Ordinary forced listings (e.g. after uploads) only bypass directory caches.
+	// Refreshing the size index explicitly also requires the existing write permission.
+	if req.Refresh && req.RefreshSizes {
+		if storage, err := fs.GetStorage(reqPath, &fs.GetStoragesArgs{}); err == nil {
+			if indexed, ok := storage.(interface{ RefreshFolderSizeIndex() }); ok {
+				indexed.RefreshFolderSizeIndex()
+			}
+		}
 	}
 	total, objs := pagination(objs, &req.PageReq)
 	provider := "unknown"

@@ -784,6 +784,9 @@ func TestComputeFolderSizes(t *testing.T) {
 
 type sizeIndexMockTransport struct {
 	allowIndex chan struct{}
+	scans      atomic.Int32
+	feeds      atomic.Int32
+	afterCopy  chan struct{}
 }
 
 func (m *sizeIndexMockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -795,6 +798,21 @@ func (m *sizeIndexMockTransport) RoundTrip(req *http.Request) (*http.Response, e
 
 	var body string
 	switch {
+	case strings.HasSuffix(req.URL.Path, "/startPageToken"):
+		body = `{"startPageToken":"initial"}`
+	case strings.HasSuffix(req.URL.Path, "/changes"):
+		m.feeds.Add(1)
+		if pageToken == "steady" && m.afterCopy != nil {
+			select {
+			case <-m.afterCopy:
+				body = `{"newStartPageToken":"after","changes":[{"fileId":"file-sub1","changeType":"file","file":{"id":"file-sub1","mimeType":"application/octet-stream","parents":["dir-sub"],"size":"4096"}}]}`
+			default:
+			}
+		}
+		if body == "" {
+			body = `{"newStartPageToken":"steady","changes":[]}`
+		}
+
 	case strings.Contains(q, "'root' in parents"):
 		body = `{
 			"files": [
@@ -804,7 +822,13 @@ func (m *sizeIndexMockTransport) RoundTrip(req *http.Request) (*http.Response, e
 				{"id":"file-1","name":"hello.txt","mimeType":"text/plain","size":"100"}
 			]
 		}`
+	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/copy"):
+		if m.afterCopy != nil {
+			close(m.afterCopy)
+		}
+		body = `{"id":"copied-1"}`
 	case q == "trashed = false" && pageToken == "":
+		m.scans.Add(1)
 		if m.allowIndex != nil {
 			select {
 			case <-m.allowIndex:
@@ -844,7 +868,8 @@ func TestListAttachesDynamicFolderSizeIndex(t *testing.T) {
 	defer func() { base.RestyClient = old }()
 
 	allowIndex := make(chan struct{})
-	base.RestyClient = resty.New().SetTransport(&sizeIndexMockTransport{allowIndex: allowIndex})
+	mock := &sizeIndexMockTransport{allowIndex: allowIndex}
+	base.RestyClient = resty.New().SetTransport(mock)
 
 	d := &GoogleDrive{AccessToken: "test-token"}
 	defer d.Drop(context.Background())
@@ -870,7 +895,25 @@ func TestListAttachesDynamicFolderSizeIndex(t *testing.T) {
 		t.Fatalf("expected hello.txt size 100, got %d", got)
 	}
 
-	// Release background index pagination and wait for completion.
+	// A plain list didn't schedule an index. Explicitly start the same work
+	// that Init kicks off, then let its paginated mock response complete.
+	idx := d.getSizeIndex()
+	idx.mu.RLock()
+	refreshing := idx.refreshing
+	idx.mu.RUnlock()
+	if refreshing {
+		t.Fatal("a normal listing unexpectedly started a full size scan")
+	}
+	if _, err := d.List(context.Background(), &model.Object{ID: "root", IsFolder: true}, model.ListArgs{Refresh: true}); err != nil {
+		t.Fatal(err)
+	}
+	idx.mu.RLock()
+	refreshing = idx.refreshing
+	idx.mu.RUnlock()
+	if refreshing {
+		t.Fatal("bypassing the directory cache unexpectedly started a size scan")
+	}
+	d.refreshFolderSizes(false)
 	close(allowIndex)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -893,6 +936,50 @@ func TestListAttachesDynamicFolderSizeIndex(t *testing.T) {
 	if got := byName["hello.txt"].GetSize(); got != 100 {
 		t.Fatalf("expected hello.txt size 100, got %d", got)
 	}
+}
+
+// A copy completed during the initial scan must cause a second background
+// pass even if nobody returns to the UI after the write.
+func TestFolderSizeIndexFollowsSuccessfulCopyDuringScan(t *testing.T) {
+	old := base.RestyClient
+	defer func() { base.RestyClient = old }()
+	allowIndex := make(chan struct{})
+	mock := &sizeIndexMockTransport{allowIndex: allowIndex, afterCopy: make(chan struct{})}
+	base.RestyClient = resty.New().SetTransport(mock)
+	ctx := context.Background()
+	d := &GoogleDrive{AccessToken: "test-token"}
+	defer d.Drop(ctx)
+
+	d.refreshFolderSizes(false)
+	src := &model.Object{ID: "file-sub1", Name: "test.bin"}
+	dest := &model.Object{ID: "dir-sub", IsFolder: true}
+	if err := d.Copy(ctx, src, dest); err != nil {
+		t.Fatal(err)
+	}
+	idx := d.getSizeIndex()
+	idx.mu.RLock()
+	dirty := idx.dirty
+	idx.mu.RUnlock()
+	if !dirty {
+		t.Fatal("successful copy did not queue background size calculation")
+	}
+	close(allowIndex)
+
+	deadline := time.Now().Add(sizeIndexWriteDebounce + 3*time.Second)
+	for time.Now().Before(deadline) {
+		if sz, ready := d.lookupFolderSize("dir-a"); ready && sz == 5120 {
+			if got := mock.scans.Load(); got != 1 {
+				t.Fatalf("expected only a startup full listing, got %d", got)
+			}
+			if got := mock.feeds.Load(); got != 2 {
+				t.Fatalf("expected one catch-up and one incremental request, got %d", got)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	sz, ready := d.lookupFolderSize("dir-a")
+	t.Fatalf("background index did not catch the copy: size=%d ready=%v scans=%d", sz, ready, mock.scans.Load())
 }
 
 type failIfCalledTransport struct {

@@ -62,6 +62,7 @@ export const usePath = () => {
       index?: number
       size?: number
       force?: boolean
+      refreshSizes?: boolean
     }) => {
       const page = {
         index: arg?.index,
@@ -77,6 +78,7 @@ export const usePath = () => {
         new axios.CancelToken((c) => {
           cancelList = c
         }),
+        arg?.refreshSizes,
       )
     },
   )
@@ -102,25 +104,39 @@ export const usePath = () => {
     index?: number,
     rp?: boolean,
     force?: boolean,
+    refreshSizes?: boolean,
   ) => {
     cancelObj?.()
     cancelList?.()
     retry_pass = rp ?? false
     ObjStore.setErr("")
-    if (hasHistory(path, index)) {
+    if (!force && hasHistory(path, index)) {
       log(`handle [${getHistoryKey(path, index)}] from history`)
       return recoverHistory(path, index)
     } else if (IsDirRecord[path]) {
       log(`handle [${getHistoryKey(path, index)}] as folder`)
-      return handleFolder(path, index, undefined, undefined, force)
+      return handleFolder(
+        path,
+        index,
+        undefined,
+        undefined,
+        force,
+        false,
+        refreshSizes,
+      )
     } else {
       log(`handle [${getHistoryKey(path, index)}] as obj`)
-      return handleObj(path, index)
+      return handleObj(path, index, force, refreshSizes)
     }
   }
 
   // handle enter obj that don't know if it is dir or file
-  const handleObj = async (path: string, index?: number) => {
+  const handleObj = async (
+    path: string,
+    index?: number,
+    force?: boolean,
+    refreshSizes?: boolean,
+  ) => {
     shouldKeepState() || ObjStore.setState(State.FetchingObj)
     const resp = await getObj(path)
     handleRespWithoutNotify(
@@ -130,7 +146,15 @@ export const usePath = () => {
         ObjStore.setProvider(data.provider)
         if (data.is_dir) {
           setPathAs(path)
-          handleFolder(path, index)
+          void handleFolder(
+            path,
+            index,
+            undefined,
+            undefined,
+            force,
+            false,
+            refreshSizes,
+          )
         } else {
           ObjStore.setReadme(data.readme)
           ObjStore.setHeader(data.header)
@@ -151,6 +175,7 @@ export const usePath = () => {
     append = false,
     force?: boolean,
     onlyList = false,
+    refreshSizes?: boolean,
   ) => {
     if (!size) {
       size = pagination.size
@@ -160,7 +185,7 @@ export const usePath = () => {
     }
     if (!onlyList && !shouldKeepState())
       ObjStore.setState(append ? State.FetchingMore : State.FetchingObjs)
-    const resp = await getObjs({ path, index, size, force })
+    const resp = await getObjs({ path, index, size, force, refreshSizes })
     handleRespWithoutNotify(
       resp,
       (data) => {
@@ -222,7 +247,11 @@ export const usePath = () => {
     handlePathChange,
     handleFolder,
     setPathAs,
-    refresh: async (retry_pass?: boolean, force?: boolean) => {
+    refresh: async (
+      retry_pass?: boolean,
+      force?: boolean,
+      refreshSizes?: boolean,
+    ) => {
       const path = pathname()
       const scroll = window.scrollY
       clearHistory(path, globalPage)
@@ -232,12 +261,24 @@ export const usePath = () => {
       ) {
         const page = globalPage
         resetGlobalPage()
-        await handlePathChange(path, globalPage, retry_pass, force)
+        await handlePathChange(
+          path,
+          globalPage,
+          retry_pass,
+          force,
+          refreshSizes,
+        )
         while (globalPage < page) {
           await loadMore()
         }
       } else {
-        await handlePathChange(path, globalPage, retry_pass, force)
+        await handlePathChange(
+          path,
+          globalPage,
+          retry_pass,
+          force,
+          refreshSizes,
+        )
       }
       window.scroll({ top: scroll, behavior: "smooth" })
     },

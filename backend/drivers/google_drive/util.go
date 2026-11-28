@@ -233,6 +233,13 @@ func (d *GoogleDrive) request(apiURL string, method string, callback base.ReqCal
 	return d.requestWithContext(context.Background(), apiURL, method, callback, resp)
 }
 
+type driveHTTPError struct {
+	status  int
+	message string
+}
+
+func (e *driveHTTPError) Error() string { return e.message }
+
 func (d *GoogleDrive) requestWithContext(ctx context.Context, apiURL string, method string, callback base.ReqCallback, resp interface{}) ([]byte, error) {
 	refreshed := false
 	for retryAttempt := 0; ; {
@@ -279,9 +286,9 @@ func (d *GoogleDrive) requestWithContext(ctx context.Context, apiURL string, met
 			continue
 		}
 		if e.Error.Code != 0 {
-			return nil, fmt.Errorf("%s: %v", e.Error.Message, e.Error.Errors)
+			return nil, &driveHTTPError{res.StatusCode(), fmt.Sprintf("%s: %v", e.Error.Message, e.Error.Errors)}
 		}
-		return nil, fmt.Errorf("request failed with HTTP %d: %s", res.StatusCode(), res.String())
+		return nil, &driveHTTPError{res.StatusCode(), fmt.Sprintf("request failed with HTTP %d: %s", res.StatusCode(), res.String())}
 	}
 }
 

@@ -44,7 +44,7 @@ func (d *GoogleDrive) Init(ctx context.Context) error {
 	if err := d.refreshToken(); err != nil {
 		return err
 	}
-	d.maybeRefreshFolderSizes(false)
+	d.refreshFolderSizes(false)
 	return nil
 }
 
@@ -81,13 +81,17 @@ func getReadID(obj model.Obj) string {
 	return obj.GetID()
 }
 
-func (d *GoogleDrive) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]model.Obj, error) {
+// RefreshFolderSizeIndex schedules reconciliation for an explicit UI request.
+func (d *GoogleDrive) RefreshFolderSizeIndex() {
+	d.refreshFolderSizes(true)
+}
+
+func (d *GoogleDrive) List(ctx context.Context, dir model.Obj, _ model.ListArgs) ([]model.Obj, error) {
 	files, err := d.getFiles(ctx, getReadID(dir))
 	if err != nil {
 		return nil, err
 	}
 	idx := d.getSizeIndex()
-	d.maybeRefreshFolderSizes(args.Refresh)
 	return utils.SliceConvert(files, func(src File) (model.Obj, error) {
 		obj := fileToObj(src)
 		if obj.IsDir() {

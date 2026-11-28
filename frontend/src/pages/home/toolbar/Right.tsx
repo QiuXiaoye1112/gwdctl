@@ -77,7 +77,7 @@ export const Right = () => {
                 as={RiSystemRefreshLine}
                 tips="refresh"
                 onClick={() => {
-                  refresh(undefined, true)
+                  refresh(undefined, true, true)
                 }}
               />
               <RightIcon

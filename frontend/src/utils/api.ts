@@ -46,6 +46,7 @@ export const fsList = (
   per_page = 0,
   refresh = false,
   cancelToken?: CancelToken,
+  refreshSizes = false,
 ): Promise<FsListResp> => {
   return r.post(
     "/fs/list",
@@ -55,6 +56,7 @@ export const fsList = (
       page,
       per_page,
       refresh,
+      ...(refreshSizes ? { refresh_sizes: true } : {}),
     },
     {
       cancelToken: cancelToken,
